@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --ink:#14213d; --muted:#6b7280; --line:#e5e7eb; --bg:#f5f7fb;
+      --card:#fff; --accent:#ff6b00; --accent2:#16324f; --good:#14804a;
+      --warn:#b7791f; --bad:#c53030; --shadow:0 8px 30px rgba(20,33,61,.08);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:#111827}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .app{display:grid;grid-template-columns:230px 1fr;min-height:100vh}
+    .sidebar{background:var(--accent2);color:white;padding:24px 16px;position:sticky;top:0;height:100vh}
+    .brand{font-weight:900;font-size:25px;letter-spacing:-.7px;padding:2px 12px 24px}
+    .brand span{color:var(--accent)}
+    .nav button{display:flex;width:100%;gap:10px;align-items:center;border:0;color:#dbe7f2;background:transparent;padding:12px 14px;border-radius:12px;margin:3px 0;text-align:left}
+    .nav button:hover,.nav button.active{background:rgba(255,255,255,.12);color:white}
+    .nav .disabled{opacity:.45}
+    .sidebar-foot{position:absolute;left:28px;bottom:24px;right:28px;font-size:12px;color:#aebfd1}
+    .main{min-width:0}
+    .topbar{height:70px;background:white;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:5}
+    .topbar h1{font-size:18px;margin:0}
+    .user{font-size:12px;color:var(--muted)}
+    .content{padding:26px;max-width:1450px;margin:auto}
+    .toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
+    .toolbar h2{margin:0;font-size:25px;letter-spacing:-.5px}
+    .actions{display:flex;gap:8px;flex-wrap:wrap}
+    .btn{border:1px solid var(--line);background:white;padding:10px 14px;border-radius:10px;font-weight:700;color:var(--ink)}
+    .btn:hover{transform:translateY(-1px)}
+    .btn.primary{border-color:var(--accent);background:var(--accent);color:white}
+    .btn.dark{background:var(--accent2);border-color:var(--accent2);color:white}
+    .btn.small{padding:7px 10px;font-size:12px}
+    .grid{display:grid;gap:16px}
+    .kpis{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:18px}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+    .kpi{padding:18px}
+    .kpi-label{font-size:12px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+    .kpi-value{font-size:28px;font-weight:900;margin-top:8px;letter-spacing:-1px}
+    .kpi-note{font-size:12px;color:var(--muted);margin-top:4px}
+    .section{padding:20px}
+    .section-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+    .section-head h3{margin:0;font-size:16px}
+    .table-wrap{overflow:auto}
+    table{border-collapse:collapse;width:100%;font-size:13px}
+    th{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+    td{padding:12px 10px;border-bottom:1px solid #f0f1f4;vertical-align:top}
+    tr.clickable:hover{background:#fafbfc;cursor:pointer}
+    .status{display:inline-flex;padding:5px 8px;border-radius:999px;background:#edf2f7;font-size:11px;font-weight:800;white-space:nowrap}
+    .status.ready{background:#e6ffef;color:#137a45}.status.urgent{background:#fff0ed;color:#ad321f}
+    .money{font-variant-numeric:tabular-nums;font-weight:800}
+    .muted{color:var(--muted)}
+    .filters{display:flex;gap:8px;flex-wrap:wrap}
+    .input,.select,.textarea{width:100%;border:1px solid #d9dee7;background:white;padding:10px 11px;border-radius:10px;outline:none}
+    .input:focus,.select:focus,.textarea:focus{border-color:#8da8c2;box-shadow:0 0 0 3px rgba(22,50,79,.08)}
+    .textarea{min-height:90px;resize:vertical}
+    .filters .input{width:300px}
+    .filters .select{width:190px}
+    .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    .form-grid .full{grid-column:1/-1}
+    label{display:block;font-size:12px;font-weight:800;color:#4b5563;margin-bottom:6px}
+    .required:after{content:" *";color:var(--bad)}
+    .customer-results{border:1px solid var(--line);border-radius:10px;margin-top:6px;max-height:180px;overflow:auto;display:none}
+    .customer-result{padding:10px;border-bottom:1px solid #f0f1f4;cursor:pointer}
+    .customer-result:hover{background:#f7f9fb}
+    .selected-customer{background:#eef7ff;border:1px solid #c9dfef;padding:11px;border-radius:10px;margin-top:8px;display:none}
+    .modal{position:fixed;inset:0;background:rgba(15,23,42,.52);display:none;align-items:flex-start;justify-content:center;padding:4vh 18px;z-index:20;overflow:auto}
+    .modal.open{display:flex}
+    .modal-box{width:min(900px,100%);background:white;border-radius:18px;box-shadow:0 25px 80px rgba(0,0,0,.25);overflow:hidden}
+    .modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+    .modal-head h3{margin:0}
+    .modal-body{padding:22px}
+    .modal-foot{padding:16px 22px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+    .close{border:0;background:transparent;font-size:24px;color:#6b7280}
+    .repair-hero{display:grid;grid-template-columns:1.4fr .8fr;gap:18px}
+    .detail-list{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px}
+    .detail-item .label{font-size:10px;color:var(--muted);text-transform:uppercase;font-weight:800}
+    .detail-item .value{font-size:14px;margin-top:3px}
+    .finance-box{background:var(--accent2);color:white;border-radius:14px;padding:18px}
+    .finance-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.13)}
+    .finance-row:last-child{border-bottom:0}
+    .finance-row.big{font-size:18px;font-weight:900}
+    .toast{position:fixed;right:22px;bottom:22px;background:#111827;color:white;padding:12px 16px;border-radius:12px;box-shadow:var(--shadow);display:none;z-index:50;max-width:360px}
+    .toast.error{background:#9b2c2c}
+    .loading{position:fixed;inset:0;background:rgba(255,255,255,.7);z-index:60;display:none;align-items:center;justify-content:center;font-weight:900;color:var(--ink)}
+    .empty{padding:32px;text-align:center;color:var(--muted)}
+    .mobile-menu{display:none}
+    @media(max-width:950px){
+      .app{grid-template-columns:1fr}.sidebar{position:fixed;left:-250px;z-index:30;width:230px;transition:.2s}.sidebar.open{left:0}
+      .mobile-menu{display:inline-flex}.kpis{grid-template-columns:repeat(2,1fr)}.topbar{padding:0 16px}.content{padding:18px}
+      .repair-hero{grid-template-columns:1fr}
+    }
+    @media(max-width:620px){
+      .kpis,.form-grid{grid-template-columns:1fr}.detail-list{grid-template-columns:1fr}.toolbar{align-items:flex-start;flex-direction:column}
+      .filters .input,.filters .select{width:100%}.filters{width:100%}.actions{width:100%}.actions .btn{flex:1}
+    }
+  </style>
+</head>
+<body>
+<div class="loading" id="loading">Working…</div>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">fixx<span>ir</span></div>
+    <div class="nav">
+      <button class="active" data-page="dashboard" onclick="navigate('dashboard',this)">⌂ Dashboard</button>
+      <button data-page="repairs" onclick="navigate('repairs',this)">🛠 Repairs</button>
+      <button data-page="customers" onclick="navigate('customers',this)">◉ Customers</button>
+      <button data-page="finance" onclick="navigate('finance',this)">₦ Finance</button>
+      <button class="disabled" title="Next build phase">▣ Sales — next</button>
+      <button class="disabled" title="Next build phase">▦ Inventory — next</button>
+    </div>
+    <div class="sidebar-foot">Fixxir internal operations MVP</div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button class="btn mobile-menu" onclick="toggleSidebar()">☰</button>
+        <h1 id="pageTitle">Dashboard</h1>
+      </div>
+      <div class="user" id="userLabel"></div>
+    </header>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<div class="modal" id="repairModal">
+  <div class="modal-box">
+    <div class="modal-head"><h3>New Repair</h3><button class="close" onclick="closeModal('repairModal')">×</button></div>
+    <form id="repairForm" onsubmit="submitRepair(event)">
+      <div class="modal-body">
+        <div class="section-head"><h3>Customer</h3><span class="muted" style="font-size:12px">Search existing or create automatically</span></div>
+        <div class="form-grid">
+          <div class="full">
+            <label>Find existing customer</label>
+            <input class="input" id="customerSearch" placeholder="Name, phone, customer ID…" oninput="debouncedCustomerSearch(this.value)">
+            <div class="customer-results" id="customerResults"></div>
+            <div class="selected-customer" id="selectedCustomer"></div>
+            <input type="hidden" name="Customer_ID" id="selectedCustomerId">
+          </div>
+          <div><label class="required">Customer name</label><input class="input" name="Customer_Name" id="customerName"></div>
+          <div><label class="required">Phone</label><input class="input" name="Customer_Phone" id="customerPhone"></div>
+          <div><label>Email</label><input class="input" name="Customer_Email"></div>
+          <div><label>ID number</label><input class="input" name="Customer_ID_Number"></div>
+        </div>
+
+        <div class="section-head" style="margin-top:24px"><h3>Device & Repair</h3></div>
+        <div class="form-grid">
+          <div><label class="required">Device type</label><select class="select" name="Device_Type" id="repairDeviceType"></select></div>
+          <div><label class="required">Brand</label><input class="input" name="Brand" placeholder="Apple, Samsung, HP…"></div>
+          <div><label class="required">Model</label><input class="input" name="Model"></div>
+          <div><label>Color</label><input class="input" name="Color"></div>
+          <div><label>Storage</label><input class="input" name="Storage" placeholder="128GB"></div>
+          <div><label>Serial number</label><input class="input" name="Serial_Number"></div>
+          <div><label>IMEI 1</label><input class="input" name="IMEI_1"></div>
+          <div><label>IMEI 2</label><input class="input" name="IMEI_2"></div>
+          <div class="full"><label>Accessories received</label><input class="input" name="Accessories_Received" placeholder="Charger, bag, SIM tray…"></div>
+          <div class="full"><label class="required">Reported issue</label><textarea class="textarea" name="Reported_Issue"></textarea></div>
+          <div class="full"><label>Physical condition at intake</label><textarea class="textarea" name="Physical_Condition"></textarea></div>
+          <div><label>Technician</label><select class="select" name="Technician_ID" id="repairTechnician"></select></div>
+          <div><label>Priority</label><select class="select" name="Priority" id="repairPriority"></select></div>
+          <div><label>Expected completion</label><input class="input" type="date" name="Expected_Completion"></div>
+          <div><label>Quoted amount (₦)</label><input class="input" type="number" min="0" step="1" name="Quoted_Amount"></div>
+          <div><label>Warranty days</label><input class="input" type="number" min="0" name="Warranty_Days"></div>
+          <div><label>Collection method</label><select class="select" name="Collection_Method"><option value="">Select</option><option>Pickup</option><option>Delivery</option><option>Courier</option><option>Other</option></select></div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('repairModal')">Cancel</button><button class="btn primary" type="submit">Create repair</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="repairDetailModal">
+  <div class="modal-box" style="width:min(1050px,100%)">
+    <div class="modal-head"><h3 id="repairDetailTitle">Repair</h3><button class="close" onclick="closeModal('repairDetailModal')">×</button></div>
+    <div class="modal-body" id="repairDetailBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="financeModal">
+  <div class="modal-box" style="width:min(650px,100%)">
+    <div class="modal-head"><h3 id="financeModalTitle">Post transaction</h3><button class="close" onclick="closeModal('financeModal')">×</button></div>
+    <form id="financeForm" onsubmit="submitFinance(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Repair_ID" id="financeRepairId">
+        <input type="hidden" name="Customer_ID" id="financeCustomerId">
+        <div class="form-grid">
+          <div><label class="required">Type</label><select class="select" name="Transaction_Type" id="financeType"><option>Credit</option><option>Debit</option></select></div>
+          <div><label class="required">Category</label><select class="select" name="Category" id="financeCategory"></select></div>
+          <div><label class="required">Amount (₦)</label><input class="input" type="number" min="1" step="1" name="Amount" required></div>
+          <div><label class="required">Payment method</label><select class="select" name="Payment_Method" id="financePaymentMethod"></select></div>
+          <div><label>Account</label><input class="input" name="Account" value="Operating"></div>
+          <div><label>Receipt / bank reference</label><input class="input" name="Receipt_Reference"></div>
+          <div class="full"><label>Description</label><input class="input" name="Description"></div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('financeModal')">Cancel</button><button class="btn primary" type="submit">Post transaction</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  let BOOT = null;
+  let CURRENT_PAGE = 'dashboard';
+  let CUSTOMER_TIMER = null;
+  let CURRENT_REPAIR = null;
+
+  window.addEventListener('load', async () => {
+    try {
+      showLoading(true);
+      BOOT = await server('getBootstrapData');
+      document.getElementById('userLabel').textContent = BOOT.user || '';
+      populateStaticSelects();
+      renderDashboard(BOOT.dashboard);
+    } catch (e) {
+      document.getElementById('content').innerHTML = errorPanel(e.message || e);
+    } finally { showLoading(false); }
+  });
+
+  function server(fn, arg) {
+    return new Promise((resolve, reject) => {
+      let runner = google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(err => reject(new Error(err && err.message ? err.message : String(err))));
+      if (arg === undefined) runner[fn]();
+      else runner[fn](arg);
+    });
+  }
+
+  function navigate(page, el) {
+    CURRENT_PAGE = page;
+    document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+    if (el) el.classList.add('active');
+    document.getElementById('pageTitle').textContent = page[0].toUpperCase()+page.slice(1);
+    if (window.innerWidth < 950) document.getElementById('sidebar').classList.remove('open');
+
+    if (page === 'dashboard') refreshDashboardPage();
+    if (page === 'repairs') renderRepairsPage();
+    if (page === 'customers') renderCustomersPage();
+    if (page === 'finance') renderFinancePage();
+  }
+
+  function toggleSidebar(){ document.getElementById('sidebar').classList.toggle('open'); }
+
+  function populateStaticSelects() {
+    fillSelect('repairDeviceType', BOOT.settings.Device_Type || [], 'Select device type');
+    fillSelect('repairPriority', BOOT.settings.Priority || ['Normal'], 'Select priority');
+    fillSelect('repairTechnician', BOOT.technicians.map(t => ({value:t.Technician_ID,label:t.Full_Name})), 'Unassigned');
+    fillSelect('financePaymentMethod', BOOT.settings.Payment_Method || [], 'Select method');
+    fillSelect('financeCategory', BOOT.settings.Finance_Category || [], 'Select category');
+  }
+
+  function fillSelect(id, values, placeholder) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const opts = [`<option value="">${esc(placeholder || 'Select')}</option>`];
+    values.forEach(v => {
+      if (typeof v === 'object') opts.push(`<option value="${esc(v.value)}">${esc(v.label)}</option>`);
+      else opts.push(`<option value="${esc(v)}">${esc(v)}</option>`);
+    });
+    el.innerHTML = opts.join('');
+  }
+
+  async function refreshDashboardPage() {
+    showLoading(true);
+    try {
+      const data = await server('refreshDashboard');
+      BOOT.dashboard = data;
+      renderDashboard(data);
+    } catch(e){ toast(e.message,true); } finally { showLoading(false); }
+  }
+
+  function renderDashboard(d) {
+    document.getElementById('content').innerHTML = `
+      <div class="toolbar">
+        <div><h2>Operations at a glance</h2><div class="muted" style="margin-top:5px">Repairs, cash movement and collections.</div></div>
+        <div class="actions"><button class="btn primary" onclick="openNewRepair()">+ New Repair</button><button class="btn" onclick="refreshDashboardPage()">Refresh</button></div>
+      </div>
+      <div class="grid kpis">
+        ${kpi('Open repairs', d.openRepairs, 'Active jobs in the pipeline')}
+        ${kpi('Ready for pickup', d.readyForPickup, 'Devices waiting for customers')}
+        ${kpi('Outstanding repair balances', money(d.outstandingRepairBalances), 'Uncollected repair revenue')}
+        ${kpi('Net cash today', money(d.netToday), `${money(d.todayCredits)} in · ${money(d.todayDebits)} out`)}
+      </div>
+      <div class="card section">
+        <div class="section-head"><h3>Recent repairs</h3><button class="btn small" onclick="goRepairs()">View all</button></div>
+        ${repairMiniTable(d.recentRepairs || [])}
+      </div>`;
+  }
+
+  function kpi(label,value,note){ return `<div class="card kpi"><div class="kpi-label">${esc(label)}</div><div class="kpi-value">${value}</div><div class="kpi-note">${esc(note)}</div></div>`; }
+
+  function repairMiniTable(rows) {
+    if (!rows.length) return `<div class="empty">No repairs yet. Create the first repair.</div>`;
+    return `<div class="table-wrap"><table><thead><tr><th>Repair</th><th>Customer</th><th>Device</th><th>Status</th><th>Priority</th></tr></thead><tbody>
+      ${rows.map(r => `<tr class="clickable" onclick="openRepair('${escAttr(r.Repair_ID)}')"><td><b>${esc(r.Repair_ID)}</b><br><span class="muted">${dateOnly(r.Date_Received)}</span></td><td>${esc(r.Customer_Name)}</td><td>${esc(r.Device)}</td><td>${statusBadge(r.Repair_Status)}</td><td>${r.Priority==='Urgent'?'<span class="status urgent">Urgent</span>':esc(r.Priority||'')}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  }
+
+  function goRepairs(){
+    const btn=document.querySelector('.nav button[data-page="repairs"]'); navigate('repairs',btn);
+  }
+
+  async function renderRepairsPage() {
+    document.getElementById('content').innerHTML = `
+      <div class="toolbar"><div><h2>Repairs</h2><div class="muted" style="margin-top:5px">Search by repair ID, customer, IMEI, serial, device or issue.</div></div>
+      <div class="actions"><button class="btn primary" onclick="openNewRepair()">+ New Repair</button></div></div>
+      <div class="filters" style="margin-bottom:14px"><input class="input" id="repairQ" placeholder="Search repairs…" oninput="debouncedRepairLoad()"><select class="select" id="repairStatus" onchange="loadRepairs()"></select></div>
+      <div class="card section" id="repairsList"><div class="empty">Loading repairs…</div></div>`;
+    fillSelect('repairStatus', BOOT.settings.Repair_Status || [], 'All statuses');
+    await loadRepairs();
+  }
+
+  let REPAIR_TIMER=null;
+  function debouncedRepairLoad(){ clearTimeout(REPAIR_TIMER); REPAIR_TIMER=setTimeout(loadRepairs,300); }
+
+  async function loadRepairs() {
+    try {
+      const q = document.getElementById('repairQ')?.value || '';
+      const status = document.getElementById('repairStatus')?.value || '';
+      const rows = await server('listRepairs',{q,status});
+      const box = document.getElementById('repairsList');
+      if (!rows.length) { box.innerHTML='<div class="empty">No matching repairs.</div>'; return; }
+      box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Repair</th><th>Customer</th><th>Device</th><th>Status</th><th>Technician</th><th>Amount</th><th>Paid</th><th>Balance</th></tr></thead><tbody>
+        ${rows.map(r=>`<tr class="clickable" onclick="openRepair('${escAttr(r.Repair_ID)}')">
+          <td><b>${esc(r.Repair_ID)}</b><br><span class="muted">${dateOnly(r.Date_Received)}</span></td>
+          <td>${esc(r.Customer_Name)}<br><span class="muted">${esc(r.Customer_Phone)}</span></td>
+          <td>${esc([r.Brand,r.Model].filter(Boolean).join(' '))}<br><span class="muted">${esc(r.IMEI_1||r.Serial_Number||'')}</span></td>
+          <td>${statusBadge(r.Repair_Status)}</td><td>${esc(r.Technician_Name||'Unassigned')}</td>
+          <td class="money">${money(num(r.Final_Amount)||num(r.Quoted_Amount))}</td><td class="money">${money(r.Amount_Paid_Calc)}</td><td class="money">${money(r.Balance_Calc)}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+    } catch(e){ toast(e.message,true); }
+  }
+
+  function renderCustomersPage() {
+    document.getElementById('content').innerHTML = `
+      <div class="toolbar"><div><h2>Customers</h2><div class="muted" style="margin-top:5px">Find customer history using name, number or ID.</div></div></div>
+      <div class="card section"><div class="filters"><input class="input" style="width:min(520px,100%)" id="customerPageQ" placeholder="Search customer…" oninput="debouncedCustomerPageSearch()"></div><div id="customerPageResults" style="margin-top:14px"><div class="empty">Start typing to search.</div></div></div>`;
+  }
+
+  let CUSTOMER_PAGE_TIMER=null;
+  function debouncedCustomerPageSearch(){clearTimeout(CUSTOMER_PAGE_TIMER); CUSTOMER_PAGE_TIMER=setTimeout(searchCustomerPage,300);}
+  async function searchCustomerPage(){
+    const q=document.getElementById('customerPageQ').value.trim();
+    if(!q){document.getElementById('customerPageResults').innerHTML='<div class="empty">Start typing to search.</div>';return;}
+    try{
+      const rows=await server('searchCustomers',q);
+      document.getElementById('customerPageResults').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Address</th><th>Status</th></tr></thead><tbody>${rows.map(c=>`<tr><td><b>${esc(c.Customer_ID)}</b></td><td>${esc(c.Full_Name)}</td><td>${esc(c.Phone_Primary)}</td><td>${esc(c.Email)}</td><td>${esc(c.Address)}</td><td>${esc(c.Status)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No customers found.</div>';
+    }catch(e){toast(e.message,true)}
+  }
+
+  function renderFinancePage() {
+    document.getElementById('content').innerHTML = `
+      <div class="toolbar"><div><h2>Finance</h2><div class="muted" style="margin-top:5px">MVP finance posting is currently repair-linked. Full ledger view comes with Sales/Inventory phase.</div></div></div>
+      <div class="grid kpis">
+        ${kpi("Today's credits", money(BOOT.dashboard.todayCredits), 'Cash/revenue posted today')}
+        ${kpi("Today's debits", money(BOOT.dashboard.todayDebits), 'Expenses posted today')}
+        ${kpi("Net today", money(BOOT.dashboard.netToday), 'Credits minus debits')}
+        ${kpi("Repair receivables", money(BOOT.dashboard.outstandingRepairBalances), 'Outstanding repair balances')}
+      </div>
+      <div class="card section"><div class="empty">Open a Repair to post a payment or direct repair expense. The full Finance Ledger screen is the next finance iteration.</div></div>`;
+  }
+
+  function openNewRepair(){
+    document.getElementById('repairForm').reset();
+    document.getElementById('selectedCustomerId').value='';
+    document.getElementById('selectedCustomer').style.display='none';
+    document.getElementById('customerResults').style.display='none';
+    populateStaticSelects();
+    document.getElementById('repairModal').classList.add('open');
+  }
+
+  function debouncedCustomerSearch(q){clearTimeout(CUSTOMER_TIMER);CUSTOMER_TIMER=setTimeout(()=>searchCustomerPicker(q),280);}
+  async function searchCustomerPicker(q){
+    const box=document.getElementById('customerResults');
+    if(!q.trim()){box.style.display='none';return;}
+    try{
+      const rows=await server('searchCustomers',q);
+      box.innerHTML=rows.length?rows.map(c=>`<div class="customer-result" onclick='selectCustomer(${JSON.stringify(c).replace(/'/g,"&#39;")})'><b>${esc(c.Full_Name)}</b><br><span class="muted">${esc(c.Customer_ID)} · ${esc(c.Phone_Primary)}</span></div>`).join(''):'<div class="customer-result muted">No existing customer found — enter details below.</div>';
+      box.style.display='block';
+    }catch(e){toast(e.message,true)}
+  }
+
+  function selectCustomer(c){
+    document.getElementById('selectedCustomerId').value=c.Customer_ID;
+    document.getElementById('customerName').value=c.Full_Name||'';
+    document.getElementById('customerPhone').value=c.Phone_Primary||'';
+    document.getElementById('selectedCustomer').innerHTML=`Using <b>${esc(c.Full_Name)}</b> · ${esc(c.Customer_ID)} · ${esc(c.Phone_Primary)}`;
+    document.getElementById('selectedCustomer').style.display='block';
+    document.getElementById('customerResults').style.display='none';
+  }
+
+  async function submitRepair(e){
+    e.preventDefault();
+    const data=formObject(e.target);
+    showLoading(true);
+    try{
+      const result=await server('createRepair',data);
+      closeModal('repairModal'); toast(`Created ${result.repair.Repair_ID}`);
+      if(CURRENT_PAGE==='repairs') await loadRepairs(); else await refreshDashboardPage();
+      openRepair(result.repair.Repair_ID);
+    }catch(err){toast(err.message,true)}finally{showLoading(false)}
+  }
+
+  async function openRepair(id){
+    showLoading(true);
+    try{
+      CURRENT_REPAIR=await server('getRepair',id);
+      renderRepairDetail(CURRENT_REPAIR);
+      document.getElementById('repairDetailModal').classList.add('open');
+    }catch(e){toast(e.message,true)}finally{showLoading(false)}
+  }
+
+  function renderRepairDetail(data){
+    const r=data.repair,c=data.customer||{},t=data.technician||{},s=data.summary;
+    document.getElementById('repairDetailTitle').textContent=`${r.Repair_ID} · ${[r.Brand,r.Model].filter(Boolean).join(' ')}`;
+    document.getElementById('repairDetailBody').innerHTML=`
+      <div class="repair-hero">
+        <div>
+          <div class="detail-list">
+            ${detail('Customer',`${c.Full_Name||''}<br><span class="muted">${c.Phone_Primary||''}</span>`)}
+            ${detail('Status',statusBadge(r.Repair_Status))}
+            ${detail('Device',[r.Device_Type,r.Brand,r.Model].filter(Boolean).join(' · '))}
+            ${detail('Technician',t.Full_Name||'Unassigned')}
+            ${detail('IMEI / Serial',[r.IMEI_1,r.Serial_Number].filter(Boolean).join(' · ')||'—')}
+            ${detail('Priority',r.Priority||'—')}
+            ${detail('Received',dateOnly(r.Date_Received))}
+            ${detail('Expected',dateOnly(r.Expected_Completion)||'—')}
+          </div>
+          <div style="margin-top:18px"><label>Reported issue</label><div>${nl2br(esc(r.Reported_Issue||'—'))}</div></div>
+          <div style="margin-top:14px"><label>Diagnosis</label><div>${nl2br(esc(r.Diagnosis||'Not yet recorded'))}</div></div>
+          <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn primary" onclick="openFinanceForRepair('Credit')">+ Customer Payment</button>
+            <button class="btn" onclick="openFinanceForRepair('Debit')">+ Repair Expense</button>
+          </div>
+        </div>
+        <div class="finance-box">
+          <div class="kpi-label" style="color:#bfd0df">Repair economics</div>
+          <div class="finance-row"><span>Repair value</span><b>${money(s.revenue)}</b></div>
+          <div class="finance-row"><span>Paid</span><b>${money(s.paid)}</b></div>
+          <div class="finance-row"><span>Balance</span><b>${money(s.balance)}</b></div>
+          <div class="finance-row"><span>Direct costs</span><b>${money(s.directCost)}</b></div>
+          <div class="finance-row big"><span>Gross profit</span><span>${money(s.grossProfit)}</span></div>
+        </div>
+      </div>
+      <div style="margin-top:24px" class="section-head"><h3>Transactions</h3></div>
+      ${transactionTable(data.transactions||[])}`;
+  }
+
+  function detail(label,value){return `<div class="detail-item"><div class="label">${esc(label)}</div><div class="value">${value}</div></div>`}
+
+  function transactionTable(rows){
+    if(!rows.length)return '<div class="empty" style="padding:16px">No financial transactions yet.</div>';
+    return `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Transaction</th><th>Category</th><th>Description</th><th>Amount</th><th>Method</th></tr></thead><tbody>${rows.map(t=>`<tr><td>${dateOnly(t.Date)}</td><td>${esc(t.Transaction_ID)}<br><span class="status">${esc(t.Transaction_Type)}</span></td><td>${esc(t.Category)}</td><td>${esc(t.Description)}</td><td class="money">${t.Transaction_Type==='Debit'?'- ':'+ '}${money(t.Amount)}</td><td>${esc(t.Payment_Method)}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function openFinanceForRepair(type){
+    if(!CURRENT_REPAIR)return;
+    const r=CURRENT_REPAIR.repair,c=CURRENT_REPAIR.customer||{};
+    document.getElementById('financeForm').reset();
+    document.getElementById('financeRepairId').value=r.Repair_ID;
+    document.getElementById('financeCustomerId').value=c.Customer_ID||'';
+    populateStaticSelects();
+    document.getElementById('financeType').value=type;
+    document.getElementById('financeModalTitle').textContent=type==='Credit'?`Record payment · ${r.Repair_ID}`:`Record repair expense · ${r.Repair_ID}`;
+    if(type==='Credit') document.getElementById('financeCategory').value='Repair Revenue';
+    document.getElementById('financeModal').classList.add('open');
+  }
+
+  async function submitFinance(e){
+    e.preventDefault();
+    const data=formObject(e.target);
+    showLoading(true);
+    try{
+      CURRENT_REPAIR=await server('postFinance',data);
+      closeModal('financeModal');toast('Transaction posted');
+      renderRepairDetail(CURRENT_REPAIR);
+      BOOT.dashboard=await server('refreshDashboard');
+      if(CURRENT_PAGE==='dashboard')renderDashboard(BOOT.dashboard);
+      if(CURRENT_PAGE==='repairs')await loadRepairs();
+    }catch(err){toast(err.message,true)}finally{showLoading(false)}
+  }
+
+  function formObject(form){
+    const fd=new FormData(form),obj={}; fd.forEach((v,k)=>obj[k]=v); return obj;
+  }
+  function closeModal(id){document.getElementById(id).classList.remove('open')}
+  function showLoading(v){document.getElementById('loading').style.display=v?'flex':'none'}
+  function toast(msg,error=false){const el=document.getElementById('toast');el.textContent=msg;el.className='toast'+(error?' error':'');el.style.display='block';setTimeout(()=>el.style.display='none',3500)}
+  function money(v){return '₦'+new Intl.NumberFormat('en-NG',{maximumFractionDigits:0}).format(num(v))}
+  function num(v){const n=Number(v);return Number.isFinite(n)?n:0}
+  function dateOnly(v){return v?String(v).slice(0,10):''}
+  function statusBadge(s){const cls=s==='Ready for Pickup'?' ready':'';return `<span class="status${cls}">${esc(s||'')}</span>`}
+  function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+  function escAttr(s){return esc(s).replace(/`/g,'&#96;')}
+  function nl2br(s){return String(s).replace(/\n/g,'<br>')}
+  function errorPanel(msg){return `<div class="card section"><h3>Setup required</h3><p>${esc(msg)}</p><p class="muted">Open the Apps Script editor and run <b>initializeFixxir("YOUR_SHEET_ID")</b> once, then reload the web app.</p></div>`}
+</script>
+</body>
+</html>

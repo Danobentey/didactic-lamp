@@ -1,0 +1,21 @@
+{
+  "name": "fixxir-operations",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy": "./scripts/deploy.sh",
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "status": "clasp status",
+    "deployments": "clasp deployments",
+    "open": "clasp open-script"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  }
+}

@@ -52,7 +52,9 @@ Do not rename those tabs without also changing Code.gs.
 8. Replace the manifest with the supplied `appsscript.json`.
 9. Save.
 10. In `Code.gs`, select/run:
-    `initializeFixxir('YOUR_SHEET_ID')`
+    `setupFixxir()`
+    - If the Apps Script project is bound to the Fixxir Sheet, it detects the Sheet automatically.
+    - If the project is standalone, run `initializeFixxir('YOUR_SHEET_ID')` once instead.
 11. Accept the Google authorization prompts.
 12. Optional: run:
     `setAllowedEmails('your@email.com,staff@email.com')`
