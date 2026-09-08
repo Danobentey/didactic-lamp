@@ -6,7 +6,7 @@ set -euo pipefail
 # Fixxir Operations - Apps Script Deployment
 # ==========================================================
 
-DEPLOYMENT_ID="AKfycbzWLpKceBMB-N6tpN4_AgaHuufDxF8eHh63-DsxXwAwUg1kDz1U2HrxQyaXtWR0WgLY"
+DEPLOYMENT_ID="AKfycbwDPZdeaB2pO1JNgPt9edXPGnsaKHipIXIC1nd2AWSzrNHsjEWzkpHMACQpvFwra7Zg"
 
 TIMESTAMP="$(date '+%Y-%m-%d %H:%M:%S')"
 
