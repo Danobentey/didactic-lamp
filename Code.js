@@ -19,6 +19,7 @@ const FIXXIR = Object.freeze({
     salesOrders: "Sales_Orders",
     salesItems: "Sales_Items",
     finance: "Finance_Ledger",
+    contacts: "Contacts",
     settings: "Settings",
   },
   prefixes: {
@@ -36,6 +37,23 @@ const FIXXIR = Object.freeze({
   },
   closedRepairStatuses: ["Completed", "Cancelled", "Returned Unrepaired"],
 });
+
+const FIXXIR_CONTACT_HEADERS = Object.freeze([
+  "Contact_ID",
+  "Full_Name",
+  "Phone_Primary",
+  "Phone_Primary_Normalized",
+  "Phone_Alternate",
+  "Phone_Alternate_Normalized",
+  "All_Phones",
+  "Email",
+  "All_Emails",
+  "Company",
+  "Job_Title",
+  "Address",
+  "Source",
+  "Search_Key",
+]);
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile("Index")
@@ -79,6 +97,9 @@ function initializeFixxir(spreadsheetId) {
   }
 
   const ss = SpreadsheetApp.openById(id);
+
+  ensureContactsSheet_(ss);
+
   const requiredSheets = Object.values(FIXXIR.sheets);
   const missing = requiredSheets.filter((name) => !ss.getSheetByName(name));
 
@@ -298,6 +319,197 @@ function searchCustomers(query) {
       ),
     )
     .slice(0, 30);
+}
+
+function importContactsCsv(csvText) {
+  assertAuthorized_();
+
+  let text = String(csvText || "").replace(/^\uFEFF/, "");
+  if (!text.trim()) throw new Error("The selected contacts CSV is empty.");
+
+  const parsed = Utilities.parseCsv(text);
+  if (!parsed.length) throw new Error("No rows were found in the contacts CSV.");
+
+  const incomingHeaders = parsed[0].map((h) =>
+    String(h || "").replace(/^\uFEFF/, "").trim(),
+  );
+
+  const missing = FIXXIR_CONTACT_HEADERS.filter(
+    (header) => !incomingHeaders.includes(header),
+  );
+
+  if (missing.length) {
+    throw new Error(
+      "This is not a normalized Fixxir contacts CSV. Missing column(s): " +
+        missing.join(", "),
+    );
+  }
+
+  const indexByHeader = {};
+  incomingHeaders.forEach((header, index) => {
+    indexByHeader[header] = index;
+  });
+
+  const data = parsed
+    .slice(1)
+    .filter((row) => row.some((value) => String(value || "").trim()))
+    .map((row) =>
+      FIXXIR_CONTACT_HEADERS.map((header) => {
+        const index = indexByHeader[header];
+        return index === undefined ? "" : row[index] || "";
+      }),
+    );
+
+  const sh = ensureContactsSheet_(getSpreadsheet_());
+
+  sh.clearContents();
+  sh.getRange(1, 1, 1, FIXXIR_CONTACT_HEADERS.length).setValues([
+    FIXXIR_CONTACT_HEADERS,
+  ]);
+
+  if (data.length) {
+    sh.getRange(2, 1, data.length, FIXXIR_CONTACT_HEADERS.length).setValues(data);
+  }
+
+  sh.setFrozenRows(1);
+
+  return {
+    ok: true,
+    imported: data.length,
+    sheetName: FIXXIR.sheets.contacts,
+  };
+}
+
+function searchCustomerSources(query) {
+  assertAuthorized_();
+
+  const raw = String(query || "").trim();
+  const q = raw.toLowerCase();
+  if (!q) return [];
+
+  ensureContactsSheet_(getSpreadsheet_());
+
+  const normalizedQueryPhone = normalizePhone_(raw);
+  const allCustomers = getRecords_(FIXXIR.sheets.customers);
+
+  const matchingCustomers = allCustomers
+    .filter((c) => {
+      const values = [
+        c.Customer_ID,
+        c.Full_Name,
+        c.Phone_Primary,
+        c.Phone_Alternate,
+        c.Email,
+        c.ID_Number,
+      ];
+
+      const textMatch = values.some((value) =>
+        String(value || "").toLowerCase().includes(q),
+      );
+
+      const phoneMatch =
+        normalizedQueryPhone.length >= 4 &&
+        [c.Phone_Primary, c.Phone_Alternate].some((phone) =>
+          normalizePhone_(phone).includes(normalizedQueryPhone),
+        );
+
+      return textMatch || phoneMatch;
+    })
+    .map((c) => Object.assign({}, c, { _Source: "Customer" }));
+
+  const customerPhones = new Set();
+  const customerEmails = new Set();
+
+  allCustomers.forEach((customer) => {
+    [customer.Phone_Primary, customer.Phone_Alternate].forEach((phone) => {
+      const normalized = normalizePhone_(phone);
+      if (normalized) customerPhones.add(normalized);
+    });
+
+    const email = String(customer.Email || "").trim().toLowerCase();
+    if (email) customerEmails.add(email);
+  });
+
+  const matchingContacts = getRecords_(FIXXIR.sheets.contacts)
+    .filter((contact) => {
+      const contactPhones = [
+        contact.Phone_Primary_Normalized,
+        contact.Phone_Alternate_Normalized,
+        contact.Phone_Primary,
+        contact.Phone_Alternate,
+      ].map(normalizePhone_).filter(Boolean);
+
+      const contactEmails = String(contact.All_Emails || contact.Email || "")
+        .split("|")
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (
+        contactPhones.some((phone) => customerPhones.has(phone)) ||
+        contactEmails.some((email) => customerEmails.has(email))
+      ) {
+        return false;
+      }
+
+      const values = [
+        contact.Contact_ID,
+        contact.Full_Name,
+        contact.Phone_Primary,
+        contact.Phone_Alternate,
+        contact.All_Phones,
+        contact.Email,
+        contact.All_Emails,
+        contact.Company,
+        contact.Search_Key,
+      ];
+
+      const textMatch = values.some((value) =>
+        String(value || "").toLowerCase().includes(q),
+      );
+
+      const phoneMatch =
+        normalizedQueryPhone.length >= 4 &&
+        contactPhones.some((phone) => phone.includes(normalizedQueryPhone));
+
+      return textMatch || phoneMatch;
+    })
+    .map((contact) =>
+      Object.assign({}, contact, {
+        Customer_ID: "",
+        _Source: "Contact",
+      }),
+    );
+
+  return matchingCustomers
+    .slice(0, 15)
+    .concat(matchingContacts.slice(0, Math.max(0, 30 - matchingCustomers.length)))
+    .slice(0, 30);
+}
+
+function ensureContactsSheet_(ss) {
+  ss = ss || getSpreadsheet_();
+
+  let sh = ss.getSheetByName(FIXXIR.sheets.contacts);
+  if (!sh) sh = ss.insertSheet(FIXXIR.sheets.contacts);
+
+  const currentHeader =
+    sh.getLastColumn() > 0
+      ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0]
+      : [];
+
+  const hasHeader = FIXXIR_CONTACT_HEADERS.every(
+    (header, index) => String(currentHeader[index] || "").trim() === header,
+  );
+
+  if (!hasHeader && sh.getLastRow() <= 1) {
+    sh.clearContents();
+    sh.getRange(1, 1, 1, FIXXIR_CONTACT_HEADERS.length).setValues([
+      FIXXIR_CONTACT_HEADERS,
+    ]);
+    sh.setFrozenRows(1);
+  }
+
+  return sh;
 }
 
 function createCustomer(payload) {
@@ -811,7 +1023,13 @@ function integer_(value) {
 }
 
 function normalizePhone_(value) {
-  return String(value || "").replace(/\D/g, "");
+  let digits = String(value || "").replace(/\D/g, "");
+
+  if (digits.startsWith("234") && digits.length >= 13) {
+    digits = "0" + digits.slice(3);
+  }
+
+  return digits;
 }
 
 function parseDate_(value) {

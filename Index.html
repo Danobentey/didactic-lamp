@@ -140,10 +140,12 @@
             <div class="customer-results" id="customerResults"></div>
             <div class="selected-customer" id="selectedCustomer"></div>
             <input type="hidden" name="Customer_ID" id="selectedCustomerId">
+            <input type="hidden" name="Customer_Phone_Alternate" id="customerPhoneAlternate">
+            <input type="hidden" name="Customer_Address" id="customerAddress">
           </div>
           <div><label class="required">Customer name</label><input class="input" name="Customer_Name" id="customerName"></div>
           <div><label class="required">Phone</label><input class="input" name="Customer_Phone" id="customerPhone"></div>
-          <div><label>Email</label><input class="input" name="Customer_Email"></div>
+          <div><label>Email</label><input class="input" name="Customer_Email" id="customerEmail"></div>
           <div><label>ID number</label><input class="input" name="Customer_ID_Number"></div>
         </div>
 
@@ -434,7 +436,13 @@
 
   function renderCustomersPage() {
     document.getElementById('content').innerHTML = `
-      <div class="toolbar"><div><h2>Customers</h2><div class="muted" style="margin-top:5px">Find customer history using name, number or ID.</div></div></div>
+      <div class="toolbar">
+        <div><h2>Customers</h2><div class="muted" style="margin-top:5px">Find customer history using name, number or ID.</div></div>
+        <div class="actions">
+          <input type="file" id="contactsCsvInput" accept=".csv,text/csv" style="display:none" onchange="importContactsFile(event)">
+          <button class="btn" onclick="document.getElementById('contactsCsvInput').click()">Import Contacts CSV</button>
+        </div>
+      </div>
       <div class="card section"><div class="filters"><input class="input" style="width:min(520px,100%)" id="customerPageQ" placeholder="Search customer…" oninput="debouncedCustomerPageSearch()"></div><div id="customerPageResults" style="margin-top:14px"><div class="empty">Start typing to search.</div></div></div>`;
   }
 
@@ -447,6 +455,35 @@
       const rows=await server('searchCustomers',q);
       document.getElementById('customerPageResults').innerHTML=rows.length?`<div class="table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Address</th><th>Status</th></tr></thead><tbody>${rows.map(c=>`<tr><td><b>${esc(c.Customer_ID)}</b></td><td>${esc(c.Full_Name)}</td><td>${esc(c.Phone_Primary)}</td><td>${esc(c.Email)}</td><td>${esc(c.Address)}</td><td>${esc(c.Status)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No customers found.</div>';
     }catch(e){toast(e.message,true)}
+  }
+
+  async function importContactsFile(event){
+    const input=event.target;
+    const file=input.files&&input.files[0];
+    if(!file)return;
+
+    if(!file.name.toLowerCase().endsWith('.csv')){
+      toast('Please select the normalized Fixxir contacts CSV.',true);
+      input.value='';
+      return;
+    }
+
+    showLoading(true);
+    try{
+      const text=await file.text();
+      const result=await server('importContactsCsv',text);
+      toast(`Imported ${result.imported} contacts`);
+
+      const results=document.getElementById('customerPageResults');
+      if(results){
+        results.innerHTML=`<div class="empty">${esc(result.imported)} contacts imported. They are now searchable when creating a repair.</div>`;
+      }
+    }catch(err){
+      toast(err.message,true);
+    }finally{
+      input.value='';
+      showLoading(false);
+    }
   }
 
   function renderFinancePage() {
@@ -474,18 +511,46 @@
   async function searchCustomerPicker(q){
     const box=document.getElementById('customerResults');
     if(!q.trim()){box.style.display='none';return;}
+
     try{
-      const rows=await server('searchCustomers',q);
-      box.innerHTML=rows.length?rows.map(c=>`<div class="customer-result" onclick='selectCustomer(${JSON.stringify(c).replace(/'/g,"&#39;")})'><b>${esc(c.Full_Name)}</b><br><span class="muted">${esc(c.Customer_ID)} · ${esc(c.Phone_Primary)}</span></div>`).join(''):'<div class="customer-result muted">No existing customer found — enter details below.</div>';
+      const rows=await server('searchCustomerSources',q);
+
+      box.innerHTML=rows.length
+        ? rows.map(c=>{
+            const isCustomer=c._Source==='Customer';
+            const sourceId=isCustomer?c.Customer_ID:(c.Contact_ID||'Contact');
+            const badge=isCustomer
+              ? '<span class="status ready">Customer</span>'
+              : '<span class="status">Contact</span>';
+
+            return `<div class="customer-result" onclick='selectCustomer(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <b>${esc(c.Full_Name||'Unnamed contact')}</b>
+                ${badge}
+              </div>
+              <span class="muted">${esc(sourceId)} · ${esc(c.Phone_Primary||c.Email||'No phone')}</span>
+            </div>`;
+          }).join('')
+        : '<div class="customer-result muted">No customer or imported contact found — enter details below.</div>';
+
       box.style.display='block';
     }catch(e){toast(e.message,true)}
   }
 
   function selectCustomer(c){
-    document.getElementById('selectedCustomerId').value=c.Customer_ID;
+    const isExisting=c._Source==='Customer'&&c.Customer_ID;
+
+    document.getElementById('selectedCustomerId').value=isExisting?c.Customer_ID:'';
     document.getElementById('customerName').value=c.Full_Name||'';
     document.getElementById('customerPhone').value=c.Phone_Primary||'';
-    document.getElementById('selectedCustomer').innerHTML=`Using <b>${esc(c.Full_Name)}</b> · ${esc(c.Customer_ID)} · ${esc(c.Phone_Primary)}`;
+    document.getElementById('customerPhoneAlternate').value=c.Phone_Alternate||'';
+    document.getElementById('customerEmail').value=c.Email||'';
+    document.getElementById('customerAddress').value=c.Address||'';
+
+    document.getElementById('selectedCustomer').innerHTML=isExisting
+      ? `Using existing customer <b>${esc(c.Full_Name||'')}</b> · ${esc(c.Customer_ID)} · ${esc(c.Phone_Primary||'')}`
+      : `Using contact <b>${esc(c.Full_Name||'')}</b> · ${esc(c.Phone_Primary||c.Email||'')}<br><span class="muted">A Fixxir customer record will be created when you create this repair.</span>`;
+
     document.getElementById('selectedCustomer').style.display='block';
     document.getElementById('customerResults').style.display='none';
   }
