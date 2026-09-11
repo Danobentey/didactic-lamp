@@ -1,0 +1,204 @@
+diff --git a/Index.html b/Index.html
+--- a/Index.html
++++ b/Index.html
+@@
+ <div class="modal" id="repairDetailModal">
+   <div class="modal-box" style="width:min(1050px,100%)">
+     <div class="modal-head"><h3 id="repairDetailTitle">Repair</h3><button class="close" onclick="closeModal('repairDetailModal')">×</button></div>
+     <div class="modal-body" id="repairDetailBody"></div>
+   </div>
+ </div>
+
++<div class="modal" id="repairEditModal">
++  <div class="modal-box" style="width:min(850px,100%)">
++    <div class="modal-head">
++      <h3 id="repairEditTitle">Edit Repair</h3>
++      <button class="close" onclick="closeModal('repairEditModal')">×</button>
++    </div>
++    <form id="repairEditForm" onsubmit="submitRepairEdit(event)">
++      <div class="modal-body">
++        <input type="hidden" name="Repair_ID" id="editRepairId">
++
++        <div class="form-grid">
++          <div>
++            <label>Technician</label>
++            <select class="select" name="Technician_ID" id="editRepairTechnician"></select>
++          </div>
++
++          <div>
++            <label>Status</label>
++            <select class="select" name="Repair_Status" id="editRepairStatus"></select>
++          </div>
++
++          <div>
++            <label>Priority</label>
++            <select class="select" name="Priority" id="editRepairPriority"></select>
++          </div>
++
++          <div>
++            <label>Expected completion</label>
++            <input class="input" type="date" name="Expected_Completion" id="editRepairExpected">
++          </div>
++
++          <div>
++            <label>Quoted amount (₦)</label>
++            <input class="input" type="number" min="0" step="1" name="Quoted_Amount" id="editRepairQuoted">
++          </div>
++
++          <div>
++            <label>Final amount (₦)</label>
++            <input class="input" type="number" min="0" step="1" name="Final_Amount" id="editRepairFinal">
++          </div>
++
++          <div>
++            <label>QA status</label>
++            <select class="select" name="QA_Status" id="editRepairQA"></select>
++          </div>
++
++          <div>
++            <label>Warranty days</label>
++            <input class="input" type="number" min="0" name="Warranty_Days" id="editRepairWarranty">
++          </div>
++
++          <div>
++            <label>Collection method</label>
++            <select class="select" name="Collection_Method" id="editRepairCollection">
++              <option value="">Select</option>
++              <option>Pickup</option>
++              <option>Delivery</option>
++              <option>Courier</option>
++              <option>Other</option>
++            </select>
++          </div>
++
++          <div>
++            <label>Date completed</label>
++            <input class="input" type="date" name="Date_Completed" id="editRepairCompleted">
++          </div>
++
++          <div class="full">
++            <label>Diagnosis</label>
++            <textarea class="textarea" name="Diagnosis" id="editRepairDiagnosis"></textarea>
++          </div>
++
++          <div class="full">
++            <label>QA notes</label>
++            <textarea class="textarea" name="QA_Notes" id="editRepairQANotes"></textarea>
++          </div>
++
++          <div class="full">
++            <label>Notes</label>
++            <textarea class="textarea" name="Notes" id="editRepairNotes"></textarea>
++          </div>
++        </div>
++      </div>
++
++      <div class="modal-foot">
++        <button type="button" class="btn" onclick="closeModal('repairEditModal')">Cancel</button>
++        <button class="btn primary" type="submit">Save changes</button>
++      </div>
++    </form>
++  </div>
++</div>
++
+ <div class="modal" id="financeModal">
+@@
+   function renderRepairDetail(data){
+     const r=data.repair,c=data.customer||{},t=data.technician||{},s=data.summary;
+     document.getElementById('repairDetailTitle').textContent=`${r.Repair_ID} · ${[r.Brand,r.Model].filter(Boolean).join(' ')}`;
+     document.getElementById('repairDetailBody').innerHTML=`
+@@
+           <div style="margin-top:14px"><label>Diagnosis</label><div>${nl2br(esc(r.Diagnosis||'Not yet recorded'))}</div></div>
+           <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
++            <button class="btn dark" onclick="openRepairEdit()">Edit Repair</button>
+             <button class="btn primary" onclick="openFinanceForRepair('Credit')">+ Customer Payment</button>
+             <button class="btn" onclick="openFinanceForRepair('Debit')">+ Repair Expense</button>
+           </div>
+@@
+       ${transactionTable(data.transactions||[])}`;
+   }
+
++  function openRepairEdit(){
++    if(!CURRENT_REPAIR) return;
++
++    const r = CURRENT_REPAIR.repair;
++
++    document.getElementById('repairEditForm').reset();
++    document.getElementById('editRepairId').value = r.Repair_ID || '';
++    document.getElementById('repairEditTitle').textContent = `Edit ${r.Repair_ID}`;
++
++    fillSelect(
++      'editRepairTechnician',
++      BOOT.technicians.map(t => ({
++        value: t.Technician_ID,
++        label: t.Full_Name
++      })),
++      'Unassigned'
++    );
++
++    fillSelect(
++      'editRepairStatus',
++      BOOT.settings.Repair_Status || [],
++      'Select status'
++    );
++
++    fillSelect(
++      'editRepairPriority',
++      BOOT.settings.Priority || [],
++      'Select priority'
++    );
++
++    fillSelect(
++      'editRepairQA',
++      BOOT.settings.QA_Status || [],
++      'Select QA status'
++    );
++
++    document.getElementById('editRepairTechnician').value = r.Technician_ID || '';
++    document.getElementById('editRepairStatus').value = r.Repair_Status || '';
++    document.getElementById('editRepairPriority').value = r.Priority || '';
++    document.getElementById('editRepairExpected').value = dateOnly(r.Expected_Completion);
++    document.getElementById('editRepairQuoted').value = r.Quoted_Amount ?? '';
++    document.getElementById('editRepairFinal').value = r.Final_Amount ?? '';
++    document.getElementById('editRepairQA').value = r.QA_Status || '';
++    document.getElementById('editRepairWarranty').value = r.Warranty_Days ?? '';
++    document.getElementById('editRepairCollection').value = r.Collection_Method || '';
++    document.getElementById('editRepairCompleted').value = dateOnly(r.Date_Completed);
++    document.getElementById('editRepairDiagnosis').value = r.Diagnosis || '';
++    document.getElementById('editRepairQANotes').value = r.QA_Notes || '';
++    document.getElementById('editRepairNotes').value = r.Notes || '';
++
++    document.getElementById('repairEditModal').classList.add('open');
++  }
++
++  async function submitRepairEdit(e){
++    e.preventDefault();
++    const data = formObject(e.target);
++
++    showLoading(true);
++
++    try {
++      CURRENT_REPAIR = await server('updateRepair', data);
++
++      closeModal('repairEditModal');
++      renderRepairDetail(CURRENT_REPAIR);
++
++      toast(`Updated ${CURRENT_REPAIR.repair.Repair_ID}`);
++
++      BOOT.dashboard = await server('refreshDashboard');
++
++      if(CURRENT_PAGE === 'dashboard'){
++        renderDashboard(BOOT.dashboard);
++      }
++
++      if(CURRENT_PAGE === 'repairs'){
++        await loadRepairs();
++      }
++    } catch(err){
++      toast(err.message, true);
++    } finally {
++      showLoading(false);
++    }
++  }
++
+   function detail(label,value){return `<div class="detail-item"><div class="label">${esc(label)}</div><div class="value">${value}</div></div>`}
