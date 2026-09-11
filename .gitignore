@@ -1,1 +1,7 @@
+/node_modules.DS_Store
+*.bak
+*.patch
+.clasprc.json
+.env
 /node_modules
+.DS_Store
