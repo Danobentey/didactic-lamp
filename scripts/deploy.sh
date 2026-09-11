@@ -42,23 +42,63 @@ if [[ -z "$DEPLOYMENT_ID" || "$DEPLOYMENT_ID" == "YOUR_EXISTING_DEPLOYMENT_ID" ]
 fi
 
 # ==========================================================
-# 1. Check Git status FIRST
+# 1. Verify clasp authentication BEFORE making a Git commit
 # ==========================================================
 
 echo "------------------------------------------------------"
-echo "1. Git working tree status"
+echo "1. Verifying clasp authentication"
+echo "------------------------------------------------------"
+
+if ! AUTH_OUTPUT="$(clasp show-authorized-user 2>&1)"; then
+  echo
+  echo "$AUTH_OUTPUT"
+  echo
+  echo "ERROR: clasp is not authenticated."
+  echo
+  echo "Run:"
+  echo "  npx clasp login"
+  echo
+  echo "Then verify:"
+  echo "  npx clasp show-authorized-user"
+  echo
+  echo "No Git commit was created and nothing was deployed."
+  exit 1
+fi
+
+echo "$AUTH_OUTPUT"
+echo
+
+# Also verify that the authenticated account can access this Apps Script project.
+if ! PROJECT_OUTPUT="$(clasp list-deployments 2>&1)"; then
+  echo "$PROJECT_OUTPUT"
+  echo
+  echo "ERROR: clasp is authenticated, but it could not access this Apps Script project."
+  echo "Check the Google account, .clasp.json scriptId, and Apps Script API access."
+  echo
+  echo "No Git commit was created and nothing was deployed."
+  exit 1
+fi
+
+echo "clasp authentication and project access verified."
+echo
+
+# ==========================================================
+# 2. Check Git status
+# ==========================================================
+
+echo "------------------------------------------------------"
+echo "2. Git working tree status"
 echo "------------------------------------------------------"
 
 git status --short
 
 echo
 echo "------------------------------------------------------"
-echo "2. Git change summary"
+echo "3. Git change summary"
 echo "------------------------------------------------------"
 
 git diff --stat
 
-# Check tracked + untracked changes.
 if [[ -n "$(git status --porcelain)" ]]; then
   HAS_CHANGES=true
 else
@@ -66,7 +106,7 @@ else
 fi
 
 # ==========================================================
-# 2. Build deployment description
+# 3. Build deployment description
 # ==========================================================
 
 if [[ "$HAS_CHANGES" == true ]]; then
@@ -107,14 +147,14 @@ echo "$DESCRIPTION"
 echo
 
 # ==========================================================
-# 3. Show clasp files
+# 4. Show clasp files
 # ==========================================================
 
 echo "------------------------------------------------------"
-echo "3. Files clasp will push"
+echo "4. Files clasp will push"
 echo "------------------------------------------------------"
 
-clasp status
+clasp show-file-status
 
 echo
 
@@ -131,14 +171,14 @@ if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
 fi
 
 # ==========================================================
-# 4. Git commit only when there are changes
+# 5. Git commit only when there are changes
 # ==========================================================
 
 if [[ "$HAS_CHANGES" == true ]]; then
 
   echo
   echo "------------------------------------------------------"
-  echo "4. Creating Git commit"
+  echo "5. Creating Git commit"
   echo "------------------------------------------------------"
 
   git add -A
@@ -161,7 +201,7 @@ else
 
   echo
   echo "------------------------------------------------------"
-  echo "4. Git commit"
+  echo "5. Git commit"
   echo "------------------------------------------------------"
   echo
   echo "No changes detected."
@@ -170,37 +210,37 @@ else
 fi
 
 # ==========================================================
-# 5. Show commit being deployed
+# 6. Show commit being deployed
 # ==========================================================
 
 echo
 echo "------------------------------------------------------"
-echo "5. Git commit being deployed"
+echo "6. Git commit being deployed"
 echo "------------------------------------------------------"
 
 git log -1 --oneline
 
 # ==========================================================
-# 6. Push source
+# 7. Push source
 # ==========================================================
 
 echo
 echo "------------------------------------------------------"
-echo "6. Pushing source to Apps Script"
+echo "7. Pushing source to Apps Script"
 echo "------------------------------------------------------"
 
 clasp push
 
 # ==========================================================
-# 7. Create Apps Script version
+# 8. Create immutable Apps Script version
 # ==========================================================
 
 echo
 echo "------------------------------------------------------"
-echo "7. Creating immutable Apps Script version"
+echo "8. Creating immutable Apps Script version"
 echo "------------------------------------------------------"
 
-VERSION_OUTPUT="$(clasp version "$DESCRIPTION")"
+VERSION_OUTPUT="$(clasp create-version "$DESCRIPTION")"
 
 echo "$VERSION_OUTPUT"
 
@@ -212,8 +252,8 @@ VERSION_NUMBER="$(
 
 if [[ -z "$VERSION_NUMBER" ]]; then
   echo
-  echo "ERROR: Could not determine newly-created version number."
-  echo "The production deployment was NOT updated."
+  echo "ERROR: Could not determine the newly-created Apps Script version number."
+  echo "Source was pushed, but the production deployment was NOT updated."
   exit 1
 fi
 
@@ -221,33 +261,35 @@ echo
 echo "Created Apps Script version: $VERSION_NUMBER"
 
 # ==========================================================
-# 8. Update existing deployment
+# 9. Update existing deployment
 # ==========================================================
 
 echo
 echo "------------------------------------------------------"
-echo "8. Updating EXISTING Fixxir deployment"
+echo "9. Updating EXISTING Fixxir deployment"
 echo "------------------------------------------------------"
 
-clasp deploy \
+clasp create-deployment \
   --deploymentId "$DEPLOYMENT_ID" \
   --versionNumber "$VERSION_NUMBER" \
   --description "$DESCRIPTION"
 
 # ==========================================================
-# 9. Verify deployment
+# 10. Verify deployment
 # ==========================================================
 
 echo
 echo "------------------------------------------------------"
-echo "9. Deployment status"
+echo "10. Deployment status"
 echo "------------------------------------------------------"
 
-clasp deployments
+clasp list-deployments
 
 # ==========================================================
 # Final summary
 # ==========================================================
+
+WEB_APP_URL="https://script.google.com/macros/s/$DEPLOYMENT_ID/exec"
 
 echo
 echo "======================================================"
@@ -267,6 +309,6 @@ echo "Deployment ID:"
 echo "$DEPLOYMENT_ID"
 echo
 echo "Web App URL:"
-echo "https://script.google.com/macros/s/$DEPLOYMENT_ID/exec"
+echo "$WEB_APP_URL"
 echo
 echo "======================================================"
