@@ -109,7 +109,7 @@
       <button data-page="repairs" onclick="navigate('repairs',this)">🛠 Repairs</button>
       <button data-page="customers" onclick="navigate('customers',this)">◉ Customers</button>
       <button data-page="finance" onclick="navigate('finance',this)">₦ Finance</button>
-      <button class="disabled" title="Next build phase">▣ Sales — next</button>
+      <button data-page="sales" onclick="navigate('sales',this)">▣ Sales</button>
       <button class="disabled" title="Next build phase">▦ Inventory — next</button>
     </div>
     <div class="sidebar-foot">Fixxir internal operations MVP</div>
@@ -146,7 +146,6 @@
           <div><label class="required">Customer name</label><input class="input" name="Customer_Name" id="customerName"></div>
           <div><label class="required">Phone</label><input class="input" name="Customer_Phone" id="customerPhone"></div>
           <div><label>Email</label><input class="input" name="Customer_Email" id="customerEmail"></div>
-          <div><label>ID number</label><input class="input" name="Customer_ID_Number"></div>
         </div>
 
         <div class="section-head" style="margin-top:24px"><h3>Device & Repair</h3></div>
@@ -276,6 +275,83 @@
   </div>
 </div>
 
+<div class="modal" id="saleModal">
+  <div class="modal-box" style="width:min(1100px,100%)">
+    <div class="modal-head"><h3>New Sale</h3><button class="close" onclick="closeModal('saleModal')">×</button></div>
+    <form id="saleForm" onsubmit="submitSale(event)">
+      <div class="modal-body">
+        <div class="section-head"><h3>Customer</h3><span class="muted" style="font-size:12px">Search customers or imported contacts</span></div>
+        <div class="form-grid">
+          <div class="full">
+            <label>Find customer/contact</label>
+            <input class="input" id="saleCustomerSearch" placeholder="Name, phone, customer ID…" oninput="debouncedSaleCustomerSearch(this.value)">
+            <div class="customer-results" id="saleCustomerResults"></div>
+            <div class="selected-customer" id="selectedSaleCustomer"></div>
+            <input type="hidden" name="Customer_ID" id="selectedSaleCustomerId">
+            <input type="hidden" name="Customer_Phone_Alternate" id="saleCustomerPhoneAlternate">
+            <input type="hidden" name="Customer_Address" id="saleCustomerAddress">
+          </div>
+          <div><label class="required">Customer name</label><input class="input" name="Customer_Name" id="saleCustomerName" required></div>
+          <div><label class="required">Phone</label><input class="input" name="Customer_Phone" id="saleCustomerPhone" required></div>
+          <div><label>Email</label><input class="input" name="Customer_Email" id="saleCustomerEmail"></div>
+          <div><label>Sale status</label><select class="select" name="Sales_Status"><option selected>Completed</option><option>Draft</option><option>Cancelled</option></select></div>
+        </div>
+
+        <div class="section-head" style="margin-top:24px">
+          <div><h3>Items</h3><div class="muted" style="font-size:12px;margin-top:4px">For phones/laptops with an IMEI or serial, enter one device per row.</div></div>
+          <button type="button" class="btn small" onclick="addSaleItemRow()">+ Add item</button>
+        </div>
+        <div id="saleItems"></div>
+
+        <div class="form-grid" style="margin-top:20px">
+          <div><label>Discount (₦)</label><input class="input" id="saleDiscount" type="number" min="0" step="1" name="Discount_Amount" value="0" oninput="recalcSale()"></div>
+          <div><label>Initial payment (₦)</label><input class="input" id="saleInitialPayment" type="number" min="0" step="1" name="Initial_Payment" value="0" oninput="recalcSale()"></div>
+          <div><label>Payment method</label><select class="select" name="Payment_Method" id="salePaymentMethod"></select></div>
+          <div><label>Receipt / bank reference</label><input class="input" name="Receipt_Reference"></div>
+          <div class="full">
+            <div class="finance-box">
+              <div class="finance-row"><span>Subtotal</span><b id="saleSubtotalView">₦0</b></div>
+              <div class="finance-row"><span>Discount</span><b id="saleDiscountView">₦0</b></div>
+              <div class="finance-row big"><span>Total</span><span id="saleTotalView">₦0</span></div>
+              <div class="finance-row"><span>Initial payment</span><b id="salePaidView">₦0</b></div>
+              <div class="finance-row"><span>Balance</span><b id="saleBalanceView">₦0</b></div>
+            </div>
+          </div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('saleModal')">Cancel</button><button class="btn primary" type="submit">Create sale</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="saleDetailModal">
+  <div class="modal-box" style="width:min(1100px,100%)">
+    <div class="modal-head"><h3 id="saleDetailTitle">Sale</h3><button class="close" onclick="closeModal('saleDetailModal')">×</button></div>
+    <div class="modal-body" id="saleDetailBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="salePaymentModal">
+  <div class="modal-box" style="width:min(650px,100%)">
+    <div class="modal-head"><h3 id="salePaymentTitle">Record sale payment</h3><button class="close" onclick="closeModal('salePaymentModal')">×</button></div>
+    <form id="salePaymentForm" onsubmit="submitSalePayment(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Sales_ID" id="salePaymentSalesId">
+        <div class="form-grid">
+          <div><label class="required">Amount (₦)</label><input class="input" id="salePaymentAmount" type="number" min="1" step="1" name="Amount" required></div>
+          <div><label class="required">Payment method</label><select class="select" name="Payment_Method" id="salePaymentMethodDetail" required></select></div>
+          <div><label>Account</label><input class="input" name="Account" value="Operating"></div>
+          <div><label>Receipt / bank reference</label><input class="input" name="Receipt_Reference"></div>
+          <div class="full"><label>Description</label><input class="input" name="Description"></div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('salePaymentModal')">Cancel</button><button class="btn primary" type="submit">Record payment</button></div>
+    </form>
+  </div>
+</div>
+
 <div class="modal" id="financeModal">
   <div class="modal-box" style="width:min(650px,100%)">
     <div class="modal-head"><h3 id="financeModalTitle">Post transaction</h3><button class="close" onclick="closeModal('financeModal')">×</button></div>
@@ -306,6 +382,10 @@
   let CURRENT_PAGE = 'dashboard';
   let CUSTOMER_TIMER = null;
   let CURRENT_REPAIR = null;
+  let CURRENT_SALE = null;
+  let SALE_TIMER = null;
+  let SALE_CUSTOMER_TIMER = null;
+  let SALE_ITEM_SEQ = 0;
 
   window.addEventListener('load', async () => {
     try {
@@ -339,6 +419,7 @@
     if (page === 'dashboard') refreshDashboardPage();
     if (page === 'repairs') renderRepairsPage();
     if (page === 'customers') renderCustomersPage();
+    if (page === 'sales') renderSalesPage();
     if (page === 'finance') renderFinancePage();
   }
 
@@ -350,6 +431,8 @@
     fillSelect('repairTechnician', BOOT.technicians.map(t => ({value:t.Technician_ID,label:t.Full_Name})), 'Unassigned');
     fillSelect('financePaymentMethod', BOOT.settings.Payment_Method || [], 'Select method');
     fillSelect('financeCategory', BOOT.settings.Finance_Category || [], 'Select category');
+    fillSelect('salePaymentMethod', BOOT.settings.Payment_Method || [], 'Select method');
+    fillSelect('salePaymentMethodDetail', BOOT.settings.Payment_Method || [], 'Select method');
   }
 
   function fillSelect(id, values, placeholder) {
@@ -482,6 +565,379 @@
       toast(err.message,true);
     }finally{
       input.value='';
+      showLoading(false);
+    }
+  }
+
+  async function renderSalesPage(){
+    document.getElementById('content').innerHTML=`
+      <div class="toolbar">
+        <div><h2>Sales</h2><div class="muted" style="margin-top:5px">Phones, laptops, accessories and other product sales.</div></div>
+        <div class="actions"><button class="btn primary" onclick="openNewSale()">+ New Sale</button></div>
+      </div>
+      <div class="grid kpis" id="salesKpis">
+        ${kpi('Orders','—','Sales orders')}
+        ${kpi('Sales value','—','Completed/non-cancelled sales')}
+        ${kpi('Outstanding','—','Customer balances')}
+        ${kpi('Gross profit','—','Sales less recorded item cost')}
+      </div>
+      <div class="filters" style="margin-bottom:14px">
+        <input class="input" id="salesQ" placeholder="Search sale, customer, IMEI, serial, SKU…" oninput="debouncedSalesLoad()">
+        <select class="select" id="salesStatus" onchange="loadSales()">
+          <option value="">All statuses</option>
+          <option>Completed</option><option>Draft</option><option>Cancelled</option>
+        </select>
+        <select class="select" id="salesPaymentStatus" onchange="loadSales()">
+          <option value="">All payment statuses</option>
+          <option>Paid</option><option>Part Paid</option><option>Unpaid</option>
+        </select>
+      </div>
+      <div class="card section" id="salesList"><div class="empty">Loading sales…</div></div>`;
+
+    await loadSales();
+  }
+
+  function debouncedSalesLoad(){
+    clearTimeout(SALE_TIMER);
+    SALE_TIMER=setTimeout(loadSales,300);
+  }
+
+  async function loadSales(){
+    try{
+      const q=document.getElementById('salesQ')?.value||'';
+      const status=document.getElementById('salesStatus')?.value||'';
+      const paymentStatus=document.getElementById('salesPaymentStatus')?.value||'';
+
+      const data=await server('getSalesPageData',{q,status,paymentStatus});
+      const s=data.summary||{};
+
+      const kpis=document.getElementById('salesKpis');
+      if(kpis){
+        kpis.innerHTML=`
+          ${kpi('Orders',s.orders||0,'Sales orders')}
+          ${kpi('Sales value',money(s.totalSales),'Completed/non-cancelled sales')}
+          ${kpi('Outstanding',money(s.outstanding),'Customer balances')}
+          ${kpi('Gross profit',money(s.grossProfit),'Sales less recorded item cost')}`;
+      }
+
+      const box=document.getElementById('salesList');
+      const rows=data.sales||[];
+
+      if(!rows.length){
+        box.innerHTML='<div class="empty">No matching sales.</div>';
+        return;
+      }
+
+      box.innerHTML=`<div class="table-wrap"><table>
+        <thead><tr><th>Sale</th><th>Customer</th><th>Items</th><th>Status</th><th>Total</th><th>Paid</th><th>Balance</th><th>Payment</th></tr></thead>
+        <tbody>${rows.map(row=>`
+          <tr class="clickable" onclick="openSale('${escAttr(row.Sales_ID)}')">
+            <td><b>${esc(row.Sales_ID)}</b><br><span class="muted">${dateOnly(row.Date)}</span></td>
+            <td>${esc(row.Customer_Name)}<br><span class="muted">${esc(row.Customer_Phone)}</span></td>
+            <td>${esc(row.Item_Summary||`${row.Item_Count_Calc||0} item(s)`)}</td>
+            <td>${statusBadge(row.Sales_Status)}</td>
+            <td class="money">${money(row.Total_Amount)}</td>
+            <td class="money">${money(row.Amount_Paid_Calc)}</td>
+            <td class="money">${money(row.Balance_Calc)}</td>
+            <td>${salePaymentBadge(row.Payment_Status_Calc)}</td>
+          </tr>`).join('')}</tbody></table></div>`;
+    }catch(e){
+      toast(e.message,true);
+    }
+  }
+
+  function openNewSale(){
+    const form=document.getElementById('saleForm');
+    form.reset();
+
+    document.getElementById('selectedSaleCustomerId').value='';
+    document.getElementById('saleCustomerPhoneAlternate').value='';
+    document.getElementById('saleCustomerAddress').value='';
+    document.getElementById('selectedSaleCustomer').style.display='none';
+    document.getElementById('saleCustomerResults').style.display='none';
+
+    document.getElementById('saleItems').innerHTML='';
+    SALE_ITEM_SEQ=0;
+    addSaleItemRow();
+
+    fillSelect('salePaymentMethod',BOOT.settings.Payment_Method||[],'Select method');
+    recalcSale();
+    document.getElementById('saleModal').classList.add('open');
+  }
+
+  function debouncedSaleCustomerSearch(q){
+    clearTimeout(SALE_CUSTOMER_TIMER);
+    SALE_CUSTOMER_TIMER=setTimeout(()=>searchSaleCustomerPicker(q),280);
+  }
+
+  async function searchSaleCustomerPicker(q){
+    const box=document.getElementById('saleCustomerResults');
+    if(!q.trim()){box.style.display='none';return;}
+
+    try{
+      const rows=await server('searchCustomerSources',q);
+
+      box.innerHTML=rows.length
+        ? rows.map(c=>{
+            const isCustomer=c._Source==='Customer';
+            const sourceId=isCustomer?c.Customer_ID:(c.Contact_ID||'Contact');
+            const badge=isCustomer
+              ? '<span class="status ready">Customer</span>'
+              : '<span class="status">Contact</span>';
+
+            return `<div class="customer-result" onclick='selectSaleCustomer(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <b>${esc(c.Full_Name||'Unnamed contact')}</b>${badge}
+              </div>
+              <span class="muted">${esc(sourceId)} · ${esc(c.Phone_Primary||c.Email||'No phone')}</span>
+            </div>`;
+          }).join('')
+        : '<div class="customer-result muted">No customer/contact found — enter details manually.</div>';
+
+      box.style.display='block';
+    }catch(e){toast(e.message,true)}
+  }
+
+  function selectSaleCustomer(c){
+    const existing=c._Source==='Customer'&&c.Customer_ID;
+
+    document.getElementById('selectedSaleCustomerId').value=existing?c.Customer_ID:'';
+    document.getElementById('saleCustomerName').value=c.Full_Name||'';
+    document.getElementById('saleCustomerPhone').value=c.Phone_Primary||'';
+    document.getElementById('saleCustomerPhoneAlternate').value=c.Phone_Alternate||'';
+    document.getElementById('saleCustomerEmail').value=c.Email||'';
+    document.getElementById('saleCustomerAddress').value=c.Address||'';
+
+    document.getElementById('selectedSaleCustomer').innerHTML=existing
+      ? `Using existing customer <b>${esc(c.Full_Name||'')}</b> · ${esc(c.Customer_ID)}`
+      : `Using contact <b>${esc(c.Full_Name||'')}</b><br><span class="muted">A customer record will be created with this sale.</span>`;
+
+    document.getElementById('selectedSaleCustomer').style.display='block';
+    document.getElementById('saleCustomerResults').style.display='none';
+  }
+
+  function addSaleItemRow(item={}){
+    SALE_ITEM_SEQ+=1;
+    const row=document.createElement('div');
+    row.className='card section sale-item-row';
+    row.style.marginBottom='10px';
+    row.dataset.row=String(SALE_ITEM_SEQ);
+
+    row.innerHTML=`
+      <div class="section-head">
+        <h3>Item ${SALE_ITEM_SEQ}</h3>
+        <button class="btn small" type="button" onclick="removeSaleItemRow(this)">Remove</button>
+      </div>
+      <div class="form-grid">
+        <div><label class="required">Product</label><input class="input" data-field="Product_Name" value="${escAttr(item.Product_Name||'')}" placeholder="iPhone 13, AirPods, HP EliteBook…"></div>
+        <div><label>SKU</label><input class="input" data-field="SKU" value="${escAttr(item.SKU||'')}"></div>
+        <div><label class="required">Quantity</label><input class="input" type="number" min="1" step="1" data-field="Quantity" value="${escAttr(item.Quantity||1)}" oninput="recalcSale()"></div>
+        <div><label class="required">Unit price (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Price" value="${escAttr(item.Unit_Price||'')}" oninput="recalcSale()"></div>
+        <div><label>Unit cost (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Cost" value="${escAttr(item.Unit_Cost||'')}" oninput="recalcSale()"></div>
+        <div><label>IMEI / Serial</label><input class="input" data-field="IMEI_or_Serial" value="${escAttr(item.IMEI_or_Serial||'')}" placeholder="One serialized device per row"></div>
+        <div class="full"><label>Item notes</label><input class="input" data-field="Notes" value="${escAttr(item.Notes||'')}"></div>
+        <div class="full" style="text-align:right"><span class="muted">Line total:</span> <b class="sale-line-total">${money(0)}</b></div>
+      </div>`;
+
+    document.getElementById('saleItems').appendChild(row);
+    recalcSale();
+  }
+
+  function removeSaleItemRow(button){
+    const rows=document.querySelectorAll('.sale-item-row');
+    if(rows.length<=1){
+      toast('A sale needs at least one item.',true);
+      return;
+    }
+    button.closest('.sale-item-row').remove();
+    recalcSale();
+  }
+
+  function saleItemsPayload(){
+    return [...document.querySelectorAll('.sale-item-row')].map(row=>{
+      const get=(field)=>row.querySelector(`[data-field="${field}"]`)?.value||'';
+      return {
+        Product_Name:get('Product_Name'),
+        SKU:get('SKU'),
+        Quantity:get('Quantity'),
+        Unit_Price:get('Unit_Price'),
+        Unit_Cost:get('Unit_Cost'),
+        IMEI_or_Serial:get('IMEI_or_Serial'),
+        Notes:get('Notes'),
+      };
+    });
+  }
+
+  function recalcSale(){
+    let subtotal=0;
+
+    document.querySelectorAll('.sale-item-row').forEach(row=>{
+      const qty=num(row.querySelector('[data-field="Quantity"]')?.value);
+      const price=num(row.querySelector('[data-field="Unit_Price"]')?.value);
+      const line=qty*price;
+      subtotal+=line;
+
+      const view=row.querySelector('.sale-line-total');
+      if(view)view.textContent=money(line);
+    });
+
+    const discount=Math.max(0,num(document.getElementById('saleDiscount')?.value));
+    const total=Math.max(0,subtotal-discount);
+    const paid=Math.max(0,num(document.getElementById('saleInitialPayment')?.value));
+    const balance=Math.max(0,total-paid);
+
+    if(document.getElementById('saleSubtotalView'))document.getElementById('saleSubtotalView').textContent=money(subtotal);
+    if(document.getElementById('saleDiscountView'))document.getElementById('saleDiscountView').textContent=money(discount);
+    if(document.getElementById('saleTotalView'))document.getElementById('saleTotalView').textContent=money(total);
+    if(document.getElementById('salePaidView'))document.getElementById('salePaidView').textContent=money(paid);
+    if(document.getElementById('saleBalanceView'))document.getElementById('saleBalanceView').textContent=money(balance);
+  }
+
+  async function submitSale(e){
+    e.preventDefault();
+
+    const data=formObject(e.target);
+    data.Items=saleItemsPayload();
+
+    if(!data.Items.length){
+      toast('Add at least one item.',true);
+      return;
+    }
+
+    const payment=num(data.Initial_Payment);
+    if(payment>0&&!data.Payment_Method){
+      toast('Select a payment method for the initial payment.',true);
+      return;
+    }
+
+    showLoading(true);
+    try{
+      CURRENT_SALE=await server('createSale',data);
+      closeModal('saleModal');
+      toast(`Created ${CURRENT_SALE.order.Sales_ID}`);
+
+      if(CURRENT_PAGE==='sales')await loadSales();
+
+      renderSaleDetail(CURRENT_SALE);
+      document.getElementById('saleDetailModal').classList.add('open');
+
+      BOOT.dashboard=await server('refreshDashboard');
+    }catch(err){
+      toast(err.message,true);
+    }finally{
+      showLoading(false);
+    }
+  }
+
+  async function openSale(id){
+    showLoading(true);
+    try{
+      CURRENT_SALE=await server('getSale',id);
+      renderSaleDetail(CURRENT_SALE);
+      document.getElementById('saleDetailModal').classList.add('open');
+    }catch(e){
+      toast(e.message,true);
+    }finally{
+      showLoading(false);
+    }
+  }
+
+  function renderSaleDetail(data){
+    const order=data.order||{};
+    const customer=data.customer||{};
+    const summary=data.summary||{};
+    const items=data.items||[];
+
+    document.getElementById('saleDetailTitle').textContent=
+      `${order.Sales_ID||'Sale'} · ${customer.Full_Name||''}`;
+
+    document.getElementById('saleDetailBody').innerHTML=`
+      <div class="repair-hero">
+        <div>
+          <div class="detail-list">
+            ${detail('Customer',`${esc(customer.Full_Name||'')}<br><span class="muted">${esc(customer.Phone_Primary||'')}</span>`)}
+            ${detail('Status',statusBadge(order.Sales_Status||''))}
+            ${detail('Date',dateOnly(order.Date)||'—')}
+            ${detail('Payment',salePaymentBadge(summary.paymentStatus))}
+            ${detail('Items',String(items.length))}
+            ${detail('Created by',esc(order.Created_By||'—'))}
+          </div>
+          <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
+            ${summary.balance>0?'<button class="btn primary" onclick="openSalePayment()">+ Record Payment</button>':''}
+          </div>
+        </div>
+        <div class="finance-box">
+          <div class="kpi-label" style="color:#bfd0df">Sale economics</div>
+          <div class="finance-row"><span>Subtotal</span><b>${money(summary.subtotal)}</b></div>
+          <div class="finance-row"><span>Discount</span><b>${money(summary.discount)}</b></div>
+          <div class="finance-row big"><span>Total</span><span>${money(summary.total)}</span></div>
+          <div class="finance-row"><span>Paid</span><b>${money(summary.paid)}</b></div>
+          <div class="finance-row"><span>Balance</span><b>${money(summary.balance)}</b></div>
+          <div class="finance-row"><span>Recorded cost</span><b>${money(summary.costTotal)}</b></div>
+          <div class="finance-row big"><span>Gross profit</span><span>${money(summary.grossProfit)}</span></div>
+        </div>
+      </div>
+
+      <div style="margin-top:24px" class="section-head"><h3>Items</h3></div>
+      ${saleItemsTable(items)}
+
+      <div style="margin-top:24px" class="section-head"><h3>Payments</h3></div>
+      ${transactionTable(data.transactions||[])}`;
+
+  }
+
+  function saleItemsTable(rows){
+    if(!rows.length)return '<div class="empty" style="padding:16px">No sale items.</div>';
+
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Item</th><th>SKU</th><th>IMEI / Serial</th><th>Qty</th><th>Unit Price</th><th>Unit Cost</th><th>Total</th></tr></thead>
+      <tbody>${rows.map(item=>`<tr>
+        <td><b>${esc(item.Product_Name)}</b></td>
+        <td>${esc(item.SKU||'')}</td>
+        <td>${esc(item.IMEI_or_Serial||'')}</td>
+        <td>${esc(item.Quantity)}</td>
+        <td class="money">${money(item.Unit_Price)}</td>
+        <td class="money">${money(item.Unit_Cost)}</td>
+        <td class="money">${money(item.Line_Total)}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function salePaymentBadge(status){
+    const cls=status==='Paid'?' ready':'';
+    return `<span class="status${cls}">${esc(status||'Unpaid')}</span>`;
+  }
+
+  function openSalePayment(){
+    if(!CURRENT_SALE)return;
+
+    const form=document.getElementById('salePaymentForm');
+    form.reset();
+
+    document.getElementById('salePaymentSalesId').value=CURRENT_SALE.order.Sales_ID;
+    document.getElementById('salePaymentTitle').textContent=`Record payment · ${CURRENT_SALE.order.Sales_ID}`;
+    document.getElementById('salePaymentAmount').max=String(CURRENT_SALE.summary.balance||'');
+    fillSelect('salePaymentMethodDetail',BOOT.settings.Payment_Method||[],'Select method');
+
+    document.getElementById('salePaymentModal').classList.add('open');
+  }
+
+  async function submitSalePayment(e){
+    e.preventDefault();
+
+    const data=formObject(e.target);
+    showLoading(true);
+
+    try{
+      CURRENT_SALE=await server('postSalePayment',data);
+      closeModal('salePaymentModal');
+      toast('Sale payment recorded');
+      renderSaleDetail(CURRENT_SALE);
+
+      if(CURRENT_PAGE==='sales')await loadSales();
+      BOOT.dashboard=await server('refreshDashboard');
+    }catch(err){
+      toast(err.message,true);
+    }finally{
       showLoading(false);
     }
   }

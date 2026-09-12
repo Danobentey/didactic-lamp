@@ -55,6 +55,39 @@ const FIXXIR_CONTACT_HEADERS = Object.freeze([
   "Search_Key",
 ]);
 
+
+const FIXXIR_SALES_ORDER_HEADERS = Object.freeze([
+  "Sales_ID",
+  "Date",
+  "Customer_ID",
+  "Sales_Status",
+  "Subtotal",
+  "Discount_Amount",
+  "Total_Amount",
+  "Amount_Paid",
+  "Balance",
+  "Payment_Status",
+  "Payment_Method",
+  "Created_By",
+  "Last_Updated",
+  "Notes",
+]);
+
+const FIXXIR_SALES_ITEM_HEADERS = Object.freeze([
+  "Sales_Item_ID",
+  "Sales_ID",
+  "Product_ID",
+  "SKU",
+  "Product_Name",
+  "Quantity",
+  "Unit_Price",
+  "Unit_Cost",
+  "Line_Total",
+  "Cost_Total",
+  "IMEI_or_Serial",
+  "Notes",
+]);
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile("Index")
     .setTitle("Fixxir Operations")
@@ -99,6 +132,7 @@ function initializeFixxir(spreadsheetId) {
   const ss = SpreadsheetApp.openById(id);
 
   ensureContactsSheet_(ss);
+  ensureSalesSheets_(ss);
 
   const requiredSheets = Object.values(FIXXIR.sheets);
   const missing = requiredSheets.filter((name) => !ss.getSheetByName(name));
@@ -311,7 +345,6 @@ function searchCustomers(query) {
         c.Phone_Primary,
         c.Phone_Alternate,
         c.Email,
-        c.ID_Number,
       ].some((v) =>
         String(v || "")
           .toLowerCase()
@@ -400,7 +433,6 @@ function searchCustomerSources(query) {
         c.Phone_Primary,
         c.Phone_Alternate,
         c.Email,
-        c.ID_Number,
       ];
 
       const textMatch = values.some((value) =>
@@ -534,8 +566,6 @@ function createCustomer(payload) {
     Phone_Alternate: clean_(payload.Phone_Alternate),
     Email: clean_(payload.Email),
     Address: clean_(payload.Address),
-    ID_Type: clean_(payload.ID_Type),
-    ID_Number: clean_(payload.ID_Number),
     Date_of_Birth: parseDate_(payload.Date_of_Birth),
     Date_Created: now,
     Status: "Active",
@@ -561,8 +591,6 @@ function createRepair(payload) {
       Phone_Alternate: payload.Customer_Phone_Alternate,
       Email: payload.Customer_Email,
       Address: payload.Customer_Address,
-      ID_Type: payload.Customer_ID_Type,
-      ID_Number: payload.Customer_ID_Number,
     });
     customerId = customer.Customer_ID;
   } else if (!findById_(FIXXIR.sheets.customers, "Customer_ID", customerId)) {
@@ -645,6 +673,470 @@ function updateRepair(payload) {
   return getRepair(repairId);
 }
 
+/* ---------------- Sales ---------------- */
+
+function getSalesPageData(filters) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+
+  const sales = buildSalesRows_(filters || {});
+  const allRows = buildSalesRows_({});
+
+  const active = allRows.filter((row) => row.Sales_Status !== "Cancelled");
+
+  return {
+    sales,
+    summary: {
+      orders: active.length,
+      totalSales: active.reduce((sum, row) => sum + number_(row.Total_Amount), 0),
+      amountPaid: active.reduce((sum, row) => sum + number_(row.Amount_Paid_Calc), 0),
+      outstanding: active.reduce((sum, row) => sum + number_(row.Balance_Calc), 0),
+      grossProfit: active.reduce((sum, row) => sum + number_(row.Gross_Profit_Calc), 0),
+    },
+  };
+}
+
+function listSales(filters) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+  return buildSalesRows_(filters || {});
+}
+
+function buildSalesRows_(filters) {
+  const orders = getRecords_(FIXXIR.sheets.salesOrders);
+  const items = getRecords_(FIXXIR.sheets.salesItems);
+  const customers = objectMap_(getRecords_(FIXXIR.sheets.customers), "Customer_ID");
+  const financeMap = buildSalesFinanceMap_();
+
+  const itemMap = {};
+  items.forEach((item) => {
+    const id = item.Sales_ID;
+    if (!id) return;
+
+    if (!itemMap[id]) {
+      itemMap[id] = {
+        itemCount: 0,
+        quantity: 0,
+        costTotal: 0,
+        names: [],
+        search: [],
+      };
+    }
+
+    const bucket = itemMap[id];
+    bucket.itemCount += 1;
+    bucket.quantity += number_(item.Quantity);
+    bucket.costTotal += number_(item.Cost_Total) ||
+      number_(item.Unit_Cost) * number_(item.Quantity);
+
+    const name = clean_(item.Product_Name);
+    if (name && !bucket.names.includes(name)) bucket.names.push(name);
+
+    [
+      item.Product_Name,
+      item.SKU,
+      item.Product_ID,
+      item.IMEI_or_Serial,
+    ].forEach((value) => {
+      if (value) bucket.search.push(String(value));
+    });
+  });
+
+  let rows = orders.map((order) => {
+    const customer = customers[order.Customer_ID] || {};
+    const finance = financeMap[order.Sales_ID] || { credits: 0, debits: 0 };
+    const itemSummary = itemMap[order.Sales_ID] || {
+      itemCount: 0,
+      quantity: 0,
+      costTotal: 0,
+      names: [],
+      search: [],
+    };
+
+    const total = number_(order.Total_Amount);
+    const paid = finance.credits;
+    const balance = Math.max(0, total - paid);
+
+    return Object.assign({}, order, {
+      Customer_Name: customer.Full_Name || "",
+      Customer_Phone: customer.Phone_Primary || "",
+      Item_Count_Calc: itemSummary.itemCount,
+      Quantity_Calc: itemSummary.quantity,
+      Item_Summary: itemSummary.names.slice(0, 3).join(", "),
+      Item_Search: itemSummary.search.join(" "),
+      Amount_Paid_Calc: paid,
+      Balance_Calc: balance,
+      Payment_Status_Calc: salePaymentStatus_(total, paid),
+      Cost_Total_Calc: itemSummary.costTotal,
+      Gross_Profit_Calc: total - itemSummary.costTotal,
+    });
+  });
+
+  const q = clean_(filters.q).toLowerCase();
+  const status = clean_(filters.status);
+  const paymentStatus = clean_(filters.paymentStatus);
+
+  if (q) {
+    rows = rows.filter((row) =>
+      [
+        row.Sales_ID,
+        row.Customer_Name,
+        row.Customer_Phone,
+        row.Item_Summary,
+        row.Item_Search,
+      ].some((value) =>
+        String(value || "").toLowerCase().includes(q),
+      ),
+    );
+  }
+
+  if (status) rows = rows.filter((row) => row.Sales_Status === status);
+  if (paymentStatus) {
+    rows = rows.filter((row) => row.Payment_Status_Calc === paymentStatus);
+  }
+
+  rows.sort((a, b) =>
+    String(b.Date || "").localeCompare(String(a.Date || "")),
+  );
+
+  return rows.slice(0, 300);
+}
+
+function getSale(salesId) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+
+  const id = clean_(salesId);
+  if (!id) throw new Error("Sales ID is required.");
+
+  const order = findById_(FIXXIR.sheets.salesOrders, "Sales_ID", id);
+  if (!order) throw new Error("Sale not found: " + id);
+
+  const customer = order.Customer_ID
+    ? findById_(FIXXIR.sheets.customers, "Customer_ID", order.Customer_ID)
+    : null;
+
+  const items = getRecords_(FIXXIR.sheets.salesItems)
+    .filter((item) => item.Sales_ID === id);
+
+  const transactions = getRecords_(FIXXIR.sheets.finance)
+    .filter(
+      (txn) =>
+        txn.Sales_ID === id ||
+        (txn.Reference_Type === "Sale" && txn.Reference_ID === id),
+    )
+    .sort((a, b) => String(b.Date || "").localeCompare(String(a.Date || "")));
+
+  const paid = transactions
+    .filter((txn) => txn.Transaction_Type === "Credit")
+    .reduce((sum, txn) => sum + number_(txn.Amount), 0);
+
+  const total = number_(order.Total_Amount);
+  const costTotal = items.reduce(
+    (sum, item) =>
+      sum +
+      (number_(item.Cost_Total) ||
+        number_(item.Unit_Cost) * number_(item.Quantity)),
+    0,
+  );
+
+  return {
+    order,
+    customer,
+    items,
+    transactions,
+    summary: {
+      subtotal: number_(order.Subtotal),
+      discount: number_(order.Discount_Amount),
+      total,
+      paid,
+      balance: Math.max(0, total - paid),
+      paymentStatus: salePaymentStatus_(total, paid),
+      costTotal,
+      grossProfit: total - costTotal,
+    },
+  };
+}
+
+function createSale(payload) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+
+  payload = payload || {};
+
+  let items = payload.Items || [];
+  if (typeof items === "string") {
+    try {
+      items = JSON.parse(items);
+    } catch (error) {
+      throw new Error("Sale items could not be read.");
+    }
+  }
+
+  if (!Array.isArray(items) || !items.length) {
+    throw new Error("Add at least one item to the sale.");
+  }
+
+  const cleanItems = items.map((item, index) => {
+    const name = clean_(item.Product_Name);
+    const quantity = number_(item.Quantity);
+    const unitPrice = number_(item.Unit_Price);
+    const unitCost = number_(item.Unit_Cost);
+    const serial = clean_(item.IMEI_or_Serial);
+
+    if (!name) throw new Error(`Item ${index + 1}: product name is required.`);
+    if (!(quantity > 0)) {
+      throw new Error(`Item ${index + 1}: quantity must be greater than zero.`);
+    }
+    if (unitPrice < 0) {
+      throw new Error(`Item ${index + 1}: unit price cannot be negative.`);
+    }
+    if (unitCost < 0) {
+      throw new Error(`Item ${index + 1}: unit cost cannot be negative.`);
+    }
+    if (serial && quantity !== 1) {
+      throw new Error(
+        `Item ${index + 1}: serialized/IMEI devices must be entered one unit per line.`,
+      );
+    }
+
+    return {
+      Product_ID: clean_(item.Product_ID),
+      SKU: clean_(item.SKU),
+      Product_Name: name,
+      Quantity: quantity,
+      Unit_Price: unitPrice,
+      Unit_Cost: unitCost,
+      Line_Total: quantity * unitPrice,
+      Cost_Total: quantity * unitCost,
+      IMEI_or_Serial: serial,
+      Notes: clean_(item.Notes),
+    };
+  });
+
+  let customerId = clean_(payload.Customer_ID);
+
+  if (!customerId) {
+    requireFields_(payload, ["Customer_Name", "Customer_Phone"]);
+
+    const customer = createCustomer({
+      Customer_Type: "Individual",
+      Full_Name: payload.Customer_Name,
+      Phone_Primary: payload.Customer_Phone,
+      Phone_Alternate: payload.Customer_Phone_Alternate,
+      Email: payload.Customer_Email,
+      Address: payload.Customer_Address,
+    });
+
+    customerId = customer.Customer_ID;
+  } else if (!findById_(FIXXIR.sheets.customers, "Customer_ID", customerId)) {
+    throw new Error("Selected customer no longer exists.");
+  }
+
+  const subtotal = cleanItems.reduce(
+    (sum, item) => sum + number_(item.Line_Total),
+    0,
+  );
+
+  const discount = number_(payload.Discount_Amount);
+  if (discount < 0) throw new Error("Discount cannot be negative.");
+  if (discount > subtotal) throw new Error("Discount cannot exceed subtotal.");
+
+  const total = subtotal - discount;
+  const initialPayment = number_(payload.Initial_Payment);
+
+  if (initialPayment < 0) {
+    throw new Error("Initial payment cannot be negative.");
+  }
+  if (initialPayment > total) {
+    throw new Error("Initial payment cannot exceed the sale total.");
+  }
+  if (initialPayment > 0 && !clean_(payload.Payment_Method)) {
+    throw new Error("Select a payment method for the initial payment.");
+  }
+
+  const salesId = generateId_(FIXXIR.sheets.salesOrders);
+  const now = new Date();
+
+  appendRecord_(FIXXIR.sheets.salesOrders, {
+    Sales_ID: salesId,
+    Date: parseDate_(payload.Date) || now,
+    Customer_ID: customerId,
+    Sales_Status: clean_(payload.Sales_Status) || "Completed",
+    Subtotal: subtotal,
+    Discount_Amount: discount,
+    Total_Amount: total,
+    Amount_Paid: initialPayment,
+    Balance: Math.max(0, total - initialPayment),
+    Payment_Status: salePaymentStatus_(total, initialPayment),
+    Payment_Method: clean_(payload.Payment_Method),
+    Created_By: currentUser_(),
+    Last_Updated: now,
+    Notes: clean_(payload.Notes),
+  });
+
+  cleanItems.forEach((item) => {
+    appendRecord_(
+      FIXXIR.sheets.salesItems,
+      Object.assign(
+        {
+          Sales_Item_ID: generateId_(FIXXIR.sheets.salesItems),
+          Sales_ID: salesId,
+        },
+        item,
+      ),
+    );
+  });
+
+  if (initialPayment > 0) {
+    postFinance({
+      Transaction_Type: "Credit",
+      Category: "Sales Revenue",
+      Amount: initialPayment,
+      Payment_Method: payload.Payment_Method,
+      Account: payload.Account || "Operating",
+      Sales_ID: salesId,
+      Customer_ID: customerId,
+      Reference_Type: "Sale",
+      Reference_ID: salesId,
+      Description: "Initial payment for " + salesId,
+      Receipt_Reference: payload.Receipt_Reference,
+      Notes: payload.Payment_Notes,
+    });
+  }
+
+  syncSalePaymentFields_(salesId);
+  return getSale(salesId);
+}
+
+function postSalePayment(payload) {
+  assertAuthorized_();
+  payload = payload || {};
+
+  const salesId = clean_(payload.Sales_ID);
+  if (!salesId) throw new Error("Sales_ID is required.");
+
+  const sale = getSale(salesId);
+  const amount = number_(payload.Amount);
+
+  if (!(amount > 0)) throw new Error("Payment amount must be greater than zero.");
+  if (amount > sale.summary.balance) {
+    throw new Error("Payment cannot exceed the outstanding sale balance.");
+  }
+
+  postFinance({
+    Transaction_Type: "Credit",
+    Category: "Sales Revenue",
+    Amount: amount,
+    Payment_Method: payload.Payment_Method,
+    Account: payload.Account || "Operating",
+    Sales_ID: salesId,
+    Customer_ID: sale.order.Customer_ID,
+    Reference_Type: "Sale",
+    Reference_ID: salesId,
+    Description: clean_(payload.Description) || "Payment for " + salesId,
+    Receipt_Reference: payload.Receipt_Reference,
+    Notes: payload.Notes,
+  });
+
+  syncSalePaymentFields_(salesId);
+  return getSale(salesId);
+}
+
+function syncSalePaymentFields_(salesId) {
+  const sale = getSale(salesId);
+
+  updateRecordById_(FIXXIR.sheets.salesOrders, "Sales_ID", salesId, {
+    Amount_Paid: sale.summary.paid,
+    Balance: sale.summary.balance,
+    Payment_Status: sale.summary.paymentStatus,
+    Last_Updated: new Date(),
+  });
+}
+
+function buildSalesFinanceMap_(financeRows) {
+  const rows = financeRows || getRecords_(FIXXIR.sheets.finance);
+  const map = {};
+
+  rows.forEach((txn) => {
+    const id =
+      txn.Sales_ID ||
+      (txn.Reference_Type === "Sale" ? txn.Reference_ID : "");
+
+    if (!id) return;
+    if (!map[id]) map[id] = { credits: 0, debits: 0 };
+
+    if (txn.Transaction_Type === "Credit") {
+      map[id].credits += number_(txn.Amount);
+    }
+    if (txn.Transaction_Type === "Debit") {
+      map[id].debits += number_(txn.Amount);
+    }
+  });
+
+  return map;
+}
+
+function salePaymentStatus_(total, paid) {
+  total = number_(total);
+  paid = number_(paid);
+
+  if (total <= 0) return "Paid";
+  if (paid >= total) return "Paid";
+  if (paid > 0) return "Part Paid";
+  return "Unpaid";
+}
+
+function ensureSalesSheets_(ss) {
+  ss = ss || getSpreadsheet_();
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.salesOrders,
+    FIXXIR_SALES_ORDER_HEADERS,
+  );
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.salesItems,
+    FIXXIR_SALES_ITEM_HEADERS,
+  );
+}
+
+function ensureSheetColumns_(ss, sheetName, requiredHeaders) {
+  let sh = ss.getSheetByName(sheetName);
+
+  if (!sh) {
+    sh = ss.insertSheet(sheetName);
+  }
+
+  const lastCol = sh.getLastColumn();
+
+  if (!lastCol) {
+    sh.getRange(1, 1, 1, requiredHeaders.length).setValues([requiredHeaders]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+
+  const existingHeaders = sh
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map((header) => String(header || "").trim());
+
+  const missingHeaders = requiredHeaders.filter(
+    (header) => !existingHeaders.includes(header),
+  );
+
+  if (missingHeaders.length) {
+    sh.getRange(1, lastCol + 1, 1, missingHeaders.length).setValues([
+      missingHeaders,
+    ]);
+  }
+
+  sh.setFrozenRows(1);
+  return sh;
+}
+
 function postFinance(payload) {
   assertAuthorized_();
   payload = payload || {};
@@ -671,6 +1163,10 @@ function postFinance(payload) {
 
   if (repairId && !findById_(FIXXIR.sheets.repairs, "Repair_ID", repairId)) {
     throw new Error("Repair not found: " + repairId);
+  }
+
+  if (salesId && !findById_(FIXXIR.sheets.salesOrders, "Sales_ID", salesId)) {
+    throw new Error("Sale not found: " + salesId);
   }
 
   const txnId = generateId_(FIXXIR.sheets.finance);
