@@ -18,6 +18,9 @@ const FIXXIR = Object.freeze({
     inventoryMovements: "Inventory_Movements",
     salesOrders: "Sales_Orders",
     salesItems: "Sales_Items",
+    catalog: "Product_Catalog",
+    quotes: "Quotes",
+    quoteItems: "Quote_Items",
     finance: "Finance_Ledger",
     contacts: "Contacts",
     settings: "Settings",
@@ -33,6 +36,9 @@ const FIXXIR = Object.freeze({
     Inventory_Movements: "MOV",
     Sales_Orders: "SAL",
     Sales_Items: "SIT",
+    Product_Catalog: "CAT",
+    Quotes: "QUO",
+    Quote_Items: "QIT",
     Finance_Ledger: "TXN",
   },
   closedRepairStatuses: ["Completed", "Cancelled", "Returned Unrepaired"],
@@ -76,14 +82,69 @@ const FIXXIR_SALES_ORDER_HEADERS = Object.freeze([
 const FIXXIR_SALES_ITEM_HEADERS = Object.freeze([
   "Sales_Item_ID",
   "Sales_ID",
+  "Item_Source",
+  "Catalog_ID",
+  "Inventory_ID",
   "Product_ID",
   "SKU",
   "Product_Name",
   "Quantity",
   "Unit_Price",
   "Unit_Cost",
+  "Cost_Status",
   "Line_Total",
   "Cost_Total",
+  "IMEI_or_Serial",
+  "Notes",
+]);
+
+const FIXXIR_CATALOG_HEADERS = Object.freeze([
+  "Catalog_ID",
+  "SKU",
+  "Product_Name",
+  "Category",
+  "Brand",
+  "Model",
+  "Variant",
+  "Default_Price",
+  "Default_Cost",
+  "Serialized",
+  "Status",
+  "Date_Created",
+  "Last_Updated",
+  "Notes",
+]);
+
+const FIXXIR_QUOTE_HEADERS = Object.freeze([
+  "Quote_ID",
+  "Date",
+  "Customer_ID",
+  "Quote_Status",
+  "Pricing_Status",
+  "Subtotal",
+  "Discount_Amount",
+  "Total_Amount",
+  "Valid_Until",
+  "Converted_Sales_ID",
+  "Created_By",
+  "Last_Updated",
+  "Notes",
+]);
+
+const FIXXIR_QUOTE_ITEM_HEADERS = Object.freeze([
+  "Quote_Item_ID",
+  "Quote_ID",
+  "Item_Source",
+  "Catalog_ID",
+  "Inventory_ID",
+  "SKU",
+  "Product_Name",
+  "Quantity",
+  "Unit_Price",
+  "Price_Status",
+  "Unit_Cost_Estimate",
+  "Cost_Status",
+  "Line_Total",
   "IMEI_or_Serial",
   "Notes",
 ]);
@@ -691,7 +752,10 @@ function getSalesPageData(filters) {
       totalSales: active.reduce((sum, row) => sum + number_(row.Total_Amount), 0),
       amountPaid: active.reduce((sum, row) => sum + number_(row.Amount_Paid_Calc), 0),
       outstanding: active.reduce((sum, row) => sum + number_(row.Balance_Calc), 0),
-      grossProfit: active.reduce((sum, row) => sum + number_(row.Gross_Profit_Calc), 0),
+      grossProfit: active
+        .filter((row) => row.Cost_Status_Calc === "Known")
+        .reduce((sum, row) => sum + number_(row.Gross_Profit_Calc), 0),
+      profitPending: active.filter((row) => row.Cost_Status_Calc !== "Known").length,
     },
   };
 }
@@ -718,6 +782,8 @@ function buildSalesRows_(filters) {
         itemCount: 0,
         quantity: 0,
         costTotal: 0,
+        allCostsKnown: true,
+        hasEstimatedCost: false,
         names: [],
         search: [],
       };
@@ -726,8 +792,18 @@ function buildSalesRows_(filters) {
     const bucket = itemMap[id];
     bucket.itemCount += 1;
     bucket.quantity += number_(item.Quantity);
-    bucket.costTotal += number_(item.Cost_Total) ||
-      number_(item.Unit_Cost) * number_(item.Quantity);
+
+    const itemCostStatus = clean_(item.Cost_Status) ||
+      (hasValue_(item.Unit_Cost) ? "Known" : "Pending");
+
+    if (itemCostStatus !== "Known") bucket.allCostsKnown = false;
+    if (itemCostStatus === "Estimated") bucket.hasEstimatedCost = true;
+
+    if (hasValue_(item.Cost_Total)) {
+      bucket.costTotal += number_(item.Cost_Total);
+    } else if (hasValue_(item.Unit_Cost)) {
+      bucket.costTotal += number_(item.Unit_Cost) * number_(item.Quantity);
+    }
 
     const name = clean_(item.Product_Name);
     if (name && !bucket.names.includes(name)) bucket.names.push(name);
@@ -749,6 +825,8 @@ function buildSalesRows_(filters) {
       itemCount: 0,
       quantity: 0,
       costTotal: 0,
+      allCostsKnown: true,
+      hasEstimatedCost: false,
       names: [],
       search: [],
     };
@@ -768,7 +846,14 @@ function buildSalesRows_(filters) {
       Balance_Calc: balance,
       Payment_Status_Calc: salePaymentStatus_(total, paid),
       Cost_Total_Calc: itemSummary.costTotal,
-      Gross_Profit_Calc: total - itemSummary.costTotal,
+      Cost_Status_Calc: itemSummary.allCostsKnown
+        ? "Known"
+        : itemSummary.hasEstimatedCost
+          ? "Estimated / Pending"
+          : "Pending",
+      Gross_Profit_Calc: itemSummary.allCostsKnown
+        ? total - itemSummary.costTotal
+        : "",
     });
   });
 
@@ -832,13 +917,23 @@ function getSale(salesId) {
     .reduce((sum, txn) => sum + number_(txn.Amount), 0);
 
   const total = number_(order.Total_Amount);
-  const costTotal = items.reduce(
-    (sum, item) =>
-      sum +
-      (number_(item.Cost_Total) ||
-        number_(item.Unit_Cost) * number_(item.Quantity)),
-    0,
-  );
+  let costTotal = 0;
+  let allCostsKnown = true;
+  let hasEstimatedCost = false;
+
+  items.forEach((item) => {
+    const status = clean_(item.Cost_Status) ||
+      (hasValue_(item.Unit_Cost) ? "Known" : "Pending");
+
+    if (status !== "Known") allCostsKnown = false;
+    if (status === "Estimated") hasEstimatedCost = true;
+
+    if (hasValue_(item.Cost_Total)) {
+      costTotal += number_(item.Cost_Total);
+    } else if (hasValue_(item.Unit_Cost)) {
+      costTotal += number_(item.Unit_Cost) * number_(item.Quantity);
+    }
+  });
 
   return {
     order,
@@ -853,7 +948,12 @@ function getSale(salesId) {
       balance: Math.max(0, total - paid),
       paymentStatus: salePaymentStatus_(total, paid),
       costTotal,
-      grossProfit: total - costTotal,
+      costStatus: allCostsKnown
+        ? "Known"
+        : hasEstimatedCost
+          ? "Estimated / Pending"
+          : "Pending",
+      grossProfit: allCostsKnown ? total - costTotal : "",
     },
   };
 }
@@ -881,7 +981,9 @@ function createSale(payload) {
     const name = clean_(item.Product_Name);
     const quantity = number_(item.Quantity);
     const unitPrice = number_(item.Unit_Price);
-    const unitCost = number_(item.Unit_Cost);
+    const unitCostRaw = clean_(item.Unit_Cost);
+    const hasCost = unitCostRaw !== "";
+    const unitCost = hasCost ? number_(unitCostRaw) : "";
     const serial = clean_(item.IMEI_or_Serial);
 
     if (!name) throw new Error(`Item ${index + 1}: product name is required.`);
@@ -891,7 +993,7 @@ function createSale(payload) {
     if (unitPrice < 0) {
       throw new Error(`Item ${index + 1}: unit price cannot be negative.`);
     }
-    if (unitCost < 0) {
+    if (hasCost && unitCost < 0) {
       throw new Error(`Item ${index + 1}: unit cost cannot be negative.`);
     }
     if (serial && quantity !== 1) {
@@ -900,15 +1002,40 @@ function createSale(payload) {
       );
     }
 
+    let catalogId = clean_(item.Catalog_ID);
+    if (!catalogId && truthy_(item.Save_to_Catalog)) {
+      catalogId = getOrCreateCatalogProduct_({
+        SKU: item.SKU,
+        Product_Name: name,
+        Default_Price: unitPrice,
+        Default_Cost: hasCost ? unitCost : "",
+        Serialized: serial ? "Yes" : "No",
+      }).Catalog_ID;
+    }
+
+    const requestedCostStatus = clean_(item.Cost_Status);
+    const costStatus = !hasCost
+      ? "Pending"
+      : ["Known", "Estimated"].includes(requestedCostStatus)
+        ? requestedCostStatus
+        : "Known";
+
+    const itemSource = clean_(item.Item_Source) ||
+      (clean_(item.Inventory_ID) ? "Inventory" : catalogId ? "Catalog" : "Ad-hoc");
+
     return {
+      Item_Source: itemSource,
+      Catalog_ID: catalogId,
+      Inventory_ID: clean_(item.Inventory_ID),
       Product_ID: clean_(item.Product_ID),
       SKU: clean_(item.SKU),
       Product_Name: name,
       Quantity: quantity,
       Unit_Price: unitPrice,
       Unit_Cost: unitCost,
+      Cost_Status: costStatus,
       Line_Total: quantity * unitPrice,
-      Cost_Total: quantity * unitCost,
+      Cost_Total: hasCost ? quantity * unitCost : "",
       IMEI_or_Serial: serial,
       Notes: clean_(item.Notes),
     };
@@ -1101,6 +1228,26 @@ function ensureSalesSheets_(ss) {
     FIXXIR.sheets.salesItems,
     FIXXIR_SALES_ITEM_HEADERS,
   );
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.catalog,
+    FIXXIR_CATALOG_HEADERS,
+  );
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.quotes,
+    FIXXIR_QUOTE_HEADERS,
+  );
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.quoteItems,
+    FIXXIR_QUOTE_ITEM_HEADERS,
+  );
+
+  migrateLegacySalesCostStatus_(ss);
 }
 
 function ensureSheetColumns_(ss, sheetName, requiredHeaders) {
@@ -1135,6 +1282,439 @@ function ensureSheetColumns_(ss, sheetName, requiredHeaders) {
 
   sh.setFrozenRows(1);
   return sh;
+}
+
+/* ---------------- Flexible Sales / Catalog / Quotes ---------------- */
+
+function migrateLegacySalesCostStatus_(ss) {
+  const sh = (ss || getSpreadsheet_()).getSheetByName(FIXXIR.sheets.salesItems);
+  if (!sh || sh.getLastRow() < 2) return;
+
+  const values = sh.getDataRange().getValues();
+  const headers = values[0].map(String);
+  const unitCostCol = headers.indexOf("Unit_Cost");
+  const costTotalCol = headers.indexOf("Cost_Total");
+  const statusCol = headers.indexOf("Cost_Status");
+
+  if (statusCol < 0 || unitCostCol < 0) return;
+
+  let changed = false;
+  for (let i = 1; i < values.length; i += 1) {
+    if (String(values[i][statusCol] || "").trim()) continue;
+
+    const unitCost = number_(values[i][unitCostCol]);
+    if (unitCost > 0) {
+      values[i][statusCol] = "Known";
+    } else {
+      // Sales Phase 1 converted blank costs to numeric zero. Treat those
+      // legacy zeroes as unknown until staff explicitly records actual cost.
+      values[i][unitCostCol] = "";
+      if (costTotalCol >= 0) values[i][costTotalCol] = "";
+      values[i][statusCol] = "Pending";
+    }
+    changed = true;
+  }
+
+  if (changed) {
+    sh.getRange(1, 1, values.length, values[0].length).setValues(values);
+  }
+}
+
+function searchSalesProducts(query) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+
+  const q = clean_(query).toLowerCase();
+  if (!q) return [];
+
+  return getRecords_(FIXXIR.sheets.catalog)
+    .filter((item) => !item.Status || item.Status === "Active")
+    .filter((item) =>
+      [
+        item.Catalog_ID,
+        item.SKU,
+        item.Product_Name,
+        item.Category,
+        item.Brand,
+        item.Model,
+        item.Variant,
+      ].some((value) =>
+        String(value || "").toLowerCase().includes(q),
+      ),
+    )
+    .slice(0, 20)
+    .map((item) => Object.assign({}, item, { _Source: "Catalog" }));
+}
+
+function saveCatalogProduct(payload) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+  return getOrCreateCatalogProduct_(payload || {});
+}
+
+function getOrCreateCatalogProduct_(payload) {
+  payload = payload || {};
+
+  const existingId = clean_(payload.Catalog_ID);
+  if (existingId) {
+    const existing = findById_(FIXXIR.sheets.catalog, "Catalog_ID", existingId);
+    if (!existing) throw new Error("Catalog item not found: " + existingId);
+    return existing;
+  }
+
+  const name = clean_(payload.Product_Name);
+  if (!name) throw new Error("Product name is required to save a catalog item.");
+
+  const sku = clean_(payload.SKU);
+  const catalog = getRecords_(FIXXIR.sheets.catalog);
+
+  const existing = catalog.find((item) => {
+    if (sku && clean_(item.SKU).toLowerCase() === sku.toLowerCase()) return true;
+    return clean_(item.Product_Name).toLowerCase() === name.toLowerCase();
+  });
+
+  if (existing) return existing;
+
+  const id = generateId_(FIXXIR.sheets.catalog);
+  const now = new Date();
+
+  appendRecord_(FIXXIR.sheets.catalog, {
+    Catalog_ID: id,
+    SKU: sku,
+    Product_Name: name,
+    Category: clean_(payload.Category),
+    Brand: clean_(payload.Brand),
+    Model: clean_(payload.Model),
+    Variant: clean_(payload.Variant),
+    Default_Price: numberOrBlank_(payload.Default_Price),
+    Default_Cost: numberOrBlank_(payload.Default_Cost),
+    Serialized: clean_(payload.Serialized) || "No",
+    Status: "Active",
+    Date_Created: now,
+    Last_Updated: now,
+    Notes: clean_(payload.Notes),
+  });
+
+  return findById_(FIXXIR.sheets.catalog, "Catalog_ID", id);
+}
+
+function updateSaleItemCost(payload) {
+  assertAuthorized_();
+  payload = payload || {};
+
+  const itemId = clean_(payload.Sales_Item_ID);
+  if (!itemId) throw new Error("Sales_Item_ID is required.");
+
+  const item = findById_(FIXXIR.sheets.salesItems, "Sales_Item_ID", itemId);
+  if (!item) throw new Error("Sale item not found: " + itemId);
+
+  const raw = clean_(payload.Unit_Cost);
+  if (!raw) throw new Error("Enter the actual unit cost.");
+
+  const unitCost = number_(raw);
+  if (unitCost < 0) throw new Error("Unit cost cannot be negative.");
+
+  updateRecordById_(FIXXIR.sheets.salesItems, "Sales_Item_ID", itemId, {
+    Unit_Cost: unitCost,
+    Cost_Total: unitCost * number_(item.Quantity),
+    Cost_Status: "Known",
+  });
+
+  return getSale(item.Sales_ID);
+}
+
+function listQuotes(filters) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+  filters = filters || {};
+
+  const customers = objectMap_(getRecords_(FIXXIR.sheets.customers), "Customer_ID");
+  const quoteItems = getRecords_(FIXXIR.sheets.quoteItems);
+  const itemMap = {};
+
+  quoteItems.forEach((item) => {
+    if (!itemMap[item.Quote_ID]) itemMap[item.Quote_ID] = [];
+    itemMap[item.Quote_ID].push(item);
+  });
+
+  let rows = getRecords_(FIXXIR.sheets.quotes).map((quote) => {
+    const customer = customers[quote.Customer_ID] || {};
+    const items = itemMap[quote.Quote_ID] || [];
+
+    return Object.assign({}, quote, {
+      Customer_Name: customer.Full_Name || "",
+      Customer_Phone: customer.Phone_Primary || "",
+      Item_Count_Calc: items.length,
+      Item_Summary: items.map((item) => item.Product_Name).filter(Boolean).slice(0, 3).join(", "),
+    });
+  });
+
+  const q = clean_(filters.q).toLowerCase();
+  const status = clean_(filters.status);
+
+  if (q) {
+    rows = rows.filter((row) =>
+      [
+        row.Quote_ID,
+        row.Customer_Name,
+        row.Customer_Phone,
+        row.Item_Summary,
+      ].some((value) => String(value || "").toLowerCase().includes(q)),
+    );
+  }
+
+  if (status) rows = rows.filter((row) => row.Quote_Status === status);
+
+  rows.sort((a, b) => String(b.Date || "").localeCompare(String(a.Date || "")));
+  return rows.slice(0, 100);
+}
+
+function getQuote(quoteId) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+
+  const id = clean_(quoteId);
+  if (!id) throw new Error("Quote ID is required.");
+
+  const quote = findById_(FIXXIR.sheets.quotes, "Quote_ID", id);
+  if (!quote) throw new Error("Quote not found: " + id);
+
+  const customer = quote.Customer_ID
+    ? findById_(FIXXIR.sheets.customers, "Customer_ID", quote.Customer_ID)
+    : null;
+
+  const items = getRecords_(FIXXIR.sheets.quoteItems)
+    .filter((item) => item.Quote_ID === id);
+
+  return { quote, customer, items };
+}
+
+function saveQuote(payload) {
+  assertAuthorized_();
+  ensureSalesSheets_(getSpreadsheet_());
+  payload = payload || {};
+
+  let items = payload.Items || [];
+  if (typeof items === "string") {
+    try {
+      items = JSON.parse(items);
+    } catch (error) {
+      throw new Error("Quote items could not be read.");
+    }
+  }
+
+  if (!Array.isArray(items) || !items.length) {
+    throw new Error("Add at least one item to the quote.");
+  }
+
+  let customerId = clean_(payload.Customer_ID);
+
+  if (!customerId) {
+    requireFields_(payload, ["Customer_Name", "Customer_Phone"]);
+
+    const customer = createCustomer({
+      Customer_Type: "Individual",
+      Full_Name: payload.Customer_Name,
+      Phone_Primary: payload.Customer_Phone,
+      Phone_Alternate: payload.Customer_Phone_Alternate,
+      Email: payload.Customer_Email,
+      Address: payload.Customer_Address,
+    });
+
+    customerId = customer.Customer_ID;
+  } else if (!findById_(FIXXIR.sheets.customers, "Customer_ID", customerId)) {
+    throw new Error("Selected customer no longer exists.");
+  }
+
+  let pricingPending = false;
+
+  const cleanItems = items.map((item, index) => {
+    const name = clean_(item.Product_Name);
+    const quantity = number_(item.Quantity);
+    const priceRaw = clean_(item.Unit_Price);
+    const priceKnown = priceRaw !== "";
+    const unitPrice = priceKnown ? number_(priceRaw) : "";
+    const costRaw = clean_(item.Unit_Cost_Estimate);
+    const costKnown = costRaw !== "";
+    const costEstimate = costKnown ? number_(costRaw) : "";
+    const serial = clean_(item.IMEI_or_Serial);
+
+    if (!name) throw new Error(`Item ${index + 1}: product name is required.`);
+    if (!(quantity > 0)) throw new Error(`Item ${index + 1}: quantity must be greater than zero.`);
+    if (priceKnown && unitPrice < 0) throw new Error(`Item ${index + 1}: price cannot be negative.`);
+    if (costKnown && costEstimate < 0) throw new Error(`Item ${index + 1}: cost estimate cannot be negative.`);
+    if (serial && quantity !== 1) {
+      throw new Error(`Item ${index + 1}: serialized/IMEI devices must be entered one unit per line.`);
+    }
+
+    if (!priceKnown) pricingPending = true;
+
+    let catalogId = clean_(item.Catalog_ID);
+    if (!catalogId && truthy_(item.Save_to_Catalog)) {
+      catalogId = getOrCreateCatalogProduct_({
+        SKU: item.SKU,
+        Product_Name: name,
+        Default_Price: priceKnown ? unitPrice : "",
+        Default_Cost: costKnown ? costEstimate : "",
+        Serialized: serial ? "Yes" : "No",
+      }).Catalog_ID;
+    }
+
+    return {
+      Item_Source: clean_(item.Item_Source) ||
+        (clean_(item.Inventory_ID) ? "Inventory" : catalogId ? "Catalog" : "Ad-hoc"),
+      Catalog_ID: catalogId,
+      Inventory_ID: clean_(item.Inventory_ID),
+      SKU: clean_(item.SKU),
+      Product_Name: name,
+      Quantity: quantity,
+      Unit_Price: unitPrice,
+      Price_Status: priceKnown ? "Known" : "Pending",
+      Unit_Cost_Estimate: costEstimate,
+      Cost_Status: costKnown ? "Estimated" : "Pending",
+      Line_Total: priceKnown ? quantity * unitPrice : "",
+      IMEI_or_Serial: serial,
+      Notes: clean_(item.Notes),
+    };
+  });
+
+  const knownSubtotal = cleanItems.reduce(
+    (sum, item) => sum + (hasValue_(item.Line_Total) ? number_(item.Line_Total) : 0),
+    0,
+  );
+
+  const discount = number_(payload.Discount_Amount);
+  if (discount < 0) throw new Error("Discount cannot be negative.");
+  if (!pricingPending && discount > knownSubtotal) {
+    throw new Error("Discount cannot exceed the quote subtotal.");
+  }
+  if (pricingPending && discount > 0) {
+    throw new Error("Finish pricing all quote items before applying a discount.");
+  }
+
+  let quoteId = clean_(payload.Quote_ID);
+  const now = new Date();
+  const pricingStatus = pricingPending ? "Pending" : "Complete";
+  const requestedStatus = clean_(payload.Quote_Status);
+  const quoteStatus = requestedStatus || (pricingPending ? "Pricing" : "Draft");
+
+  const quoteRecord = {
+    Date: parseDate_(payload.Date) || now,
+    Customer_ID: customerId,
+    Quote_Status: quoteStatus,
+    Pricing_Status: pricingStatus,
+    Subtotal: pricingPending ? "" : knownSubtotal,
+    Discount_Amount: discount,
+    Total_Amount: pricingPending ? "" : knownSubtotal - discount,
+    Valid_Until: parseDate_(payload.Valid_Until),
+    Created_By: currentUser_(),
+    Last_Updated: now,
+    Notes: clean_(payload.Notes),
+  };
+
+  if (quoteId) {
+    const existing = findById_(FIXXIR.sheets.quotes, "Quote_ID", quoteId);
+    if (!existing) throw new Error("Quote not found: " + quoteId);
+    if (existing.Converted_Sales_ID) {
+      throw new Error("A converted quote cannot be edited.");
+    }
+
+    quoteRecord.Date = existing.Date || quoteRecord.Date;
+    quoteRecord.Created_By = existing.Created_By || currentUser_();
+    quoteRecord.Converted_Sales_ID = existing.Converted_Sales_ID || "";
+    updateRecordById_(FIXXIR.sheets.quotes, "Quote_ID", quoteId, quoteRecord);
+    deleteRowsByField_(FIXXIR.sheets.quoteItems, "Quote_ID", quoteId);
+  } else {
+    quoteId = generateId_(FIXXIR.sheets.quotes);
+    appendRecord_(FIXXIR.sheets.quotes, Object.assign({ Quote_ID: quoteId }, quoteRecord));
+  }
+
+  cleanItems.forEach((item) => {
+    appendRecord_(FIXXIR.sheets.quoteItems, Object.assign({
+      Quote_Item_ID: generateId_(FIXXIR.sheets.quoteItems),
+      Quote_ID: quoteId,
+    }, item));
+  });
+
+  return getQuote(quoteId);
+}
+
+function convertQuoteToSale(quoteId) {
+  assertAuthorized_();
+
+  const data = getQuote(quoteId);
+  const quote = data.quote;
+
+  if (quote.Converted_Sales_ID) {
+    return getSale(quote.Converted_Sales_ID);
+  }
+
+  if (quote.Pricing_Status !== "Complete") {
+    throw new Error("Finish pricing every quote item before converting it to a sale.");
+  }
+
+  if (["Declined", "Expired"].includes(quote.Quote_Status)) {
+    throw new Error("This quote cannot be converted in its current status.");
+  }
+
+  const sale = createSale({
+    Customer_ID: quote.Customer_ID,
+    Sales_Status: "Pending Fulfilment",
+    Discount_Amount: quote.Discount_Amount,
+    Initial_Payment: 0,
+    Notes: [
+      "Converted from " + quote.Quote_ID,
+      quote.Notes || "",
+    ].filter(Boolean).join("\n"),
+    Items: data.items.map((item) => ({
+      Item_Source: item.Item_Source,
+      Catalog_ID: item.Catalog_ID,
+      Inventory_ID: item.Inventory_ID,
+      SKU: item.SKU,
+      Product_Name: item.Product_Name,
+      Quantity: item.Quantity,
+      Unit_Price: item.Unit_Price,
+      // Quote costs are estimates. Do not silently treat them as actual COGS.
+      Unit_Cost: "",
+      Cost_Status: "Pending",
+      IMEI_or_Serial: item.IMEI_or_Serial,
+      Notes: item.Notes,
+    })),
+  });
+
+  updateRecordById_(FIXXIR.sheets.quotes, "Quote_ID", quote.Quote_ID, {
+    Quote_Status: "Converted",
+    Converted_Sales_ID: sale.order.Sales_ID,
+    Last_Updated: new Date(),
+  });
+
+  return sale;
+}
+
+function deleteRowsByField_(sheetName, fieldName, value) {
+  const sh = getSheet_(sheetName);
+  const values = sh.getDataRange().getValues();
+  if (values.length < 2) return;
+
+  const headers = values[0].map(String);
+  const col = headers.indexOf(fieldName);
+  if (col < 0) throw new Error("Column not found: " + fieldName);
+
+  for (let row = values.length - 1; row >= 1; row -= 1) {
+    if (String(values[row][col]) === String(value)) {
+      sh.deleteRow(row + 1);
+    }
+  }
+}
+
+function hasValue_(value) {
+  return value !== "" && value !== null && value !== undefined;
+}
+
+function truthy_(value) {
+  return value === true || ["true", "1", "yes", "on"].includes(
+    String(value || "").trim().toLowerCase(),
+  );
 }
 
 function postFinance(payload) {

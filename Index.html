@@ -352,6 +352,76 @@
   </div>
 </div>
 
+<div class="modal" id="saleCostModal">
+  <div class="modal-box" style="width:min(520px,100%)">
+    <div class="modal-head"><h3 id="saleCostTitle">Set actual cost</h3><button class="close" onclick="closeModal('saleCostModal')">×</button></div>
+    <form id="saleCostForm" onsubmit="submitSaleCost(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Sales_Item_ID" id="saleCostItemId">
+        <label class="required">Actual unit cost (₦)</label>
+        <input class="input" type="number" min="0" step="1" name="Unit_Cost" id="saleCostUnitCost" required>
+        <div class="muted" style="font-size:12px;margin-top:8px">Use this when the actual procurement / landed unit cost becomes known.</div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('saleCostModal')">Cancel</button><button class="btn primary" type="submit">Save actual cost</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="quoteModal">
+  <div class="modal-box" style="width:min(1100px,100%)">
+    <div class="modal-head"><h3 id="quoteModalTitle">New Quote</h3><button class="close" onclick="closeModal('quoteModal')">×</button></div>
+    <form id="quoteForm" onsubmit="submitQuote(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Quote_ID" id="quoteId">
+        <div class="section-head"><h3>Customer</h3><span class="muted" style="font-size:12px">A quote may include items not currently stocked or catalogued.</span></div>
+        <div class="form-grid">
+          <div class="full">
+            <label>Find customer/contact</label>
+            <input class="input" id="quoteCustomerSearch" placeholder="Name, phone, customer ID…" oninput="debouncedQuoteCustomerSearch(this.value)">
+            <div class="customer-results" id="quoteCustomerResults"></div>
+            <div class="selected-customer" id="selectedQuoteCustomer"></div>
+            <input type="hidden" name="Customer_ID" id="selectedQuoteCustomerId">
+            <input type="hidden" name="Customer_Phone_Alternate" id="quoteCustomerPhoneAlternate">
+            <input type="hidden" name="Customer_Address" id="quoteCustomerAddress">
+          </div>
+          <div><label class="required">Customer name</label><input class="input" name="Customer_Name" id="quoteCustomerName" required></div>
+          <div><label class="required">Phone</label><input class="input" name="Customer_Phone" id="quoteCustomerPhone" required></div>
+          <div><label>Email</label><input class="input" name="Customer_Email" id="quoteCustomerEmail"></div>
+          <div><label>Quote status</label><select class="select" name="Quote_Status" id="quoteStatus"><option>Pricing</option><option>Draft</option><option>Sent</option><option>Accepted</option><option>Declined</option><option>Expired</option></select></div>
+          <div><label>Valid until</label><input class="input" type="date" name="Valid_Until" id="quoteValidUntil"></div>
+          <div><label>Discount (₦)</label><input class="input" type="number" min="0" step="1" name="Discount_Amount" id="quoteDiscount" value="0" oninput="recalcQuote()"></div>
+        </div>
+
+        <div class="section-head" style="margin-top:24px">
+          <div><h3>Quote items</h3><div class="muted" style="font-size:12px;margin-top:4px">Price and cost may be left blank while sourcing.</div></div>
+          <button type="button" class="btn small" onclick="addQuoteItemRow()">+ Add item</button>
+        </div>
+        <div id="quoteItems"></div>
+
+        <div class="form-grid" style="margin-top:20px">
+          <div class="full">
+            <div class="finance-box">
+              <div class="finance-row"><span>Pricing</span><b id="quotePricingView">Pending</b></div>
+              <div class="finance-row"><span>Subtotal</span><b id="quoteSubtotalView">Pending</b></div>
+              <div class="finance-row"><span>Discount</span><b id="quoteDiscountView">₦0</b></div>
+              <div class="finance-row big"><span>Total</span><span id="quoteTotalView">Pending</span></div>
+            </div>
+          </div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes" id="quoteNotes"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('quoteModal')">Cancel</button><button class="btn primary" type="submit">Save quote</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="quoteDetailModal">
+  <div class="modal-box" style="width:min(1050px,100%)">
+    <div class="modal-head"><h3 id="quoteDetailTitle">Quote</h3><button class="close" onclick="closeModal('quoteDetailModal')">×</button></div>
+    <div class="modal-body" id="quoteDetailBody"></div>
+  </div>
+</div>
+
 <div class="modal" id="financeModal">
   <div class="modal-box" style="width:min(650px,100%)">
     <div class="modal-head"><h3 id="financeModalTitle">Post transaction</h3><button class="close" onclick="closeModal('financeModal')">×</button></div>
@@ -385,7 +455,12 @@
   let CURRENT_SALE = null;
   let SALE_TIMER = null;
   let SALE_CUSTOMER_TIMER = null;
+  let SALE_PRODUCT_TIMER = null;
   let SALE_ITEM_SEQ = 0;
+  let CURRENT_QUOTE = null;
+  let QUOTE_CUSTOMER_TIMER = null;
+  let QUOTE_PRODUCT_TIMER = null;
+  let QUOTE_ITEM_SEQ = 0;
 
   window.addEventListener('load', async () => {
     try {
@@ -573,19 +648,23 @@
     document.getElementById('content').innerHTML=`
       <div class="toolbar">
         <div><h2>Sales</h2><div class="muted" style="margin-top:5px">Phones, laptops, accessories and other product sales.</div></div>
-        <div class="actions"><button class="btn primary" onclick="openNewSale()">+ New Sale</button></div>
+        <div class="actions"><button class="btn" onclick="openNewQuote()">+ New Quote</button><button class="btn primary" onclick="openNewSale()">+ New Sale</button></div>
       </div>
       <div class="grid kpis" id="salesKpis">
         ${kpi('Orders','—','Sales orders')}
         ${kpi('Sales value','—','Completed/non-cancelled sales')}
         ${kpi('Outstanding','—','Customer balances')}
-        ${kpi('Gross profit','—','Sales less recorded item cost')}
+        ${kpi('Gross profit','—','Known-cost sales only')}
+      </div>
+      <div class="card section" style="margin-bottom:18px">
+        <div class="section-head"><h3>Quotes & price requests</h3><button class="btn small" onclick="openNewQuote()">+ New Quote</button></div>
+        <div id="quotesList"><div class="empty">Loading quotes…</div></div>
       </div>
       <div class="filters" style="margin-bottom:14px">
         <input class="input" id="salesQ" placeholder="Search sale, customer, IMEI, serial, SKU…" oninput="debouncedSalesLoad()">
         <select class="select" id="salesStatus" onchange="loadSales()">
           <option value="">All statuses</option>
-          <option>Completed</option><option>Draft</option><option>Cancelled</option>
+          <option>Pending Fulfilment</option><option>Completed</option><option>Draft</option><option>Cancelled</option>
         </select>
         <select class="select" id="salesPaymentStatus" onchange="loadSales()">
           <option value="">All payment statuses</option>
@@ -594,7 +673,7 @@
       </div>
       <div class="card section" id="salesList"><div class="empty">Loading sales…</div></div>`;
 
-    await loadSales();
+    await Promise.all([loadSales(),loadQuotes()]);
   }
 
   function debouncedSalesLoad(){
@@ -617,7 +696,7 @@
           ${kpi('Orders',s.orders||0,'Sales orders')}
           ${kpi('Sales value',money(s.totalSales),'Completed/non-cancelled sales')}
           ${kpi('Outstanding',money(s.outstanding),'Customer balances')}
-          ${kpi('Gross profit',money(s.grossProfit),'Sales less recorded item cost')}`;
+          ${kpi('Gross profit',money(s.grossProfit),s.profitPending?`${s.profitPending} sale(s) pending actual cost`:'All sale costs known')}`;
       }
 
       const box=document.getElementById('salesList');
@@ -722,19 +801,35 @@
     row.className='card section sale-item-row';
     row.style.marginBottom='10px';
     row.dataset.row=String(SALE_ITEM_SEQ);
+    row.dataset.catalogName=item.Product_Name||'';
+
+    const initialCostStatus=item.Cost_Status||((item.Unit_Cost!==''&&item.Unit_Cost!=null)?'Known':'Pending');
 
     row.innerHTML=`
       <div class="section-head">
-        <h3>Item ${SALE_ITEM_SEQ}</h3>
+        <div><h3>Item ${SALE_ITEM_SEQ}</h3><span class="muted" data-role="source-label">${esc(item.Item_Source||'Ad-hoc')}</span></div>
         <button class="btn small" type="button" onclick="removeSaleItemRow(this)">Remove</button>
       </div>
       <div class="form-grid">
-        <div><label class="required">Product</label><input class="input" data-field="Product_Name" value="${escAttr(item.Product_Name||'')}" placeholder="iPhone 13, AirPods, HP EliteBook…"></div>
+        <div class="full">
+          <label class="required">Product</label>
+          <input class="input" data-field="Product_Name" value="${escAttr(item.Product_Name||'')}" placeholder="Search catalog or type any item…" oninput="saleProductChanged(this);debouncedSalesProductSearch(this)">
+          <div class="customer-results" data-role="product-results"></div>
+          <input type="hidden" data-field="Catalog_ID" value="${escAttr(item.Catalog_ID||'')}">
+          <input type="hidden" data-field="Inventory_ID" value="${escAttr(item.Inventory_ID||'')}">
+          <input type="hidden" data-field="Item_Source" value="${escAttr(item.Item_Source||'Ad-hoc')}">
+          <input type="hidden" data-field="Cost_Status" value="${escAttr(initialCostStatus)}">
+        </div>
         <div><label>SKU</label><input class="input" data-field="SKU" value="${escAttr(item.SKU||'')}"></div>
         <div><label class="required">Quantity</label><input class="input" type="number" min="1" step="1" data-field="Quantity" value="${escAttr(item.Quantity||1)}" oninput="recalcSale()"></div>
-        <div><label class="required">Unit price (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Price" value="${escAttr(item.Unit_Price||'')}" oninput="recalcSale()"></div>
-        <div><label>Unit cost (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Cost" value="${escAttr(item.Unit_Cost||'')}" oninput="recalcSale()"></div>
+        <div><label class="required">Selling price (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Price" value="${escAttr(item.Unit_Price??'')}" oninput="recalcSale()"></div>
+        <div>
+          <label>Actual unit cost (₦)</label>
+          <input class="input" type="number" min="0" step="1" data-field="Unit_Cost" value="${escAttr(item.Unit_Cost??'')}" placeholder="Leave blank if unknown" oninput="saleCostChanged(this);recalcSale()">
+          <div class="muted" style="font-size:11px;margin-top:4px" data-role="cost-label">${initialCostStatus==='Known'?'Actual cost recorded':initialCostStatus==='Estimated'?'Estimated cost — profit pending':'Unknown cost — profit pending'}</div>
+        </div>
         <div><label>IMEI / Serial</label><input class="input" data-field="IMEI_or_Serial" value="${escAttr(item.IMEI_or_Serial||'')}" placeholder="One serialized device per row"></div>
+        <div class="full"><label style="display:flex;gap:8px;align-items:center;font-weight:700"><input type="checkbox" data-field="Save_to_Catalog" ${item.Save_to_Catalog?'checked':''}> Save this item to Catalog for future searches</label></div>
         <div class="full"><label>Item notes</label><input class="input" data-field="Notes" value="${escAttr(item.Notes||'')}"></div>
         <div class="full" style="text-align:right"><span class="muted">Line total:</span> <b class="sale-line-total">${money(0)}</b></div>
       </div>`;
@@ -756,13 +851,19 @@
   function saleItemsPayload(){
     return [...document.querySelectorAll('.sale-item-row')].map(row=>{
       const get=(field)=>row.querySelector(`[data-field="${field}"]`)?.value||'';
+      const checked=(field)=>!!row.querySelector(`[data-field="${field}"]`)?.checked;
       return {
+        Item_Source:get('Item_Source')||'Ad-hoc',
+        Catalog_ID:get('Catalog_ID'),
+        Inventory_ID:get('Inventory_ID'),
         Product_Name:get('Product_Name'),
         SKU:get('SKU'),
         Quantity:get('Quantity'),
         Unit_Price:get('Unit_Price'),
         Unit_Cost:get('Unit_Cost'),
+        Cost_Status:get('Cost_Status'),
         IMEI_or_Serial:get('IMEI_or_Serial'),
+        Save_to_Catalog:checked('Save_to_Catalog'),
         Notes:get('Notes'),
       };
     });
@@ -873,8 +974,9 @@
           <div class="finance-row big"><span>Total</span><span>${money(summary.total)}</span></div>
           <div class="finance-row"><span>Paid</span><b>${money(summary.paid)}</b></div>
           <div class="finance-row"><span>Balance</span><b>${money(summary.balance)}</b></div>
-          <div class="finance-row"><span>Recorded cost</span><b>${money(summary.costTotal)}</b></div>
-          <div class="finance-row big"><span>Gross profit</span><span>${money(summary.grossProfit)}</span></div>
+          <div class="finance-row"><span>Recorded / estimated cost</span><b>${money(summary.costTotal)}</b></div>
+          <div class="finance-row"><span>Cost status</span><b>${esc(summary.costStatus||'Pending')}</b></div>
+          <div class="finance-row big"><span>Gross profit</span><span>${summary.costStatus==='Known'?money(summary.grossProfit):'Pending cost'}</span></div>
         </div>
       </div>
 
@@ -890,15 +992,18 @@
     if(!rows.length)return '<div class="empty" style="padding:16px">No sale items.</div>';
 
     return `<div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th>SKU</th><th>IMEI / Serial</th><th>Qty</th><th>Unit Price</th><th>Unit Cost</th><th>Total</th></tr></thead>
+      <thead><tr><th>Item</th><th>Source</th><th>SKU</th><th>IMEI / Serial</th><th>Qty</th><th>Unit Price</th><th>Unit Cost</th><th>Cost Status</th><th>Total</th><th></th></tr></thead>
       <tbody>${rows.map(item=>`<tr>
         <td><b>${esc(item.Product_Name)}</b></td>
+        <td>${esc(item.Item_Source||'Ad-hoc')}</td>
         <td>${esc(item.SKU||'')}</td>
         <td>${esc(item.IMEI_or_Serial||'')}</td>
         <td>${esc(item.Quantity)}</td>
         <td class="money">${money(item.Unit_Price)}</td>
-        <td class="money">${money(item.Unit_Cost)}</td>
+        <td class="money">${hasDisplayValue(item.Unit_Cost)?money(item.Unit_Cost):'—'}</td>
+        <td>${esc(item.Cost_Status||'Pending')}</td>
         <td class="money">${money(item.Line_Total)}</td>
+        <td><button class="btn small" onclick='openSaleCostEditor(${JSON.stringify(item).replace(/'/g,"&#39;")})'>${item.Cost_Status==='Known'?'Edit cost':'Set cost'}</button></td>
       </tr>`).join('')}</tbody></table></div>`;
   }
 
@@ -940,6 +1045,466 @@
     }finally{
       showLoading(false);
     }
+  }
+
+  function debouncedSalesProductSearch(input){
+    clearTimeout(SALE_PRODUCT_TIMER);
+    SALE_PRODUCT_TIMER=setTimeout(()=>searchSalesProductPicker(input),220);
+  }
+
+  async function searchSalesProductPicker(input){
+    const row=input.closest('.sale-item-row');
+    const box=row.querySelector('[data-role="product-results"]');
+    const q=input.value.trim();
+
+    if(!q){box.style.display='none';return;}
+
+    try{
+      const items=await server('searchSalesProducts',q);
+      const rowId=row.dataset.row;
+
+      box.innerHTML=items.length
+        ? items.map(item=>`<div class="customer-result" onclick='selectSaleCatalogItem("${escAttr(rowId)}",${JSON.stringify(item).replace(/'/g,"&#39;")})'>
+            <b>${esc(item.Product_Name)}</b><br>
+            <span class="muted">${esc(item.Catalog_ID)}${item.SKU?' · '+esc(item.SKU):''}${hasDisplayValue(item.Default_Price)?' · '+money(item.Default_Price):''}</span>
+          </div>`).join('')+
+          `<div class="customer-result muted" onclick="useSaleItemAsAdhoc('${escAttr(rowId)}')">Use typed item as ad-hoc (no catalog required)</div>`
+        : `<div class="customer-result muted" onclick="useSaleItemAsAdhoc('${escAttr(rowId)}')">No catalog match — use typed item as ad-hoc</div>`;
+
+      box.style.display='block';
+    }catch(e){toast(e.message,true)}
+  }
+
+  function selectSaleCatalogItem(rowId,item){
+    const row=[...document.querySelectorAll('.sale-item-row')].find(r=>r.dataset.row===String(rowId));
+    if(!row)return;
+
+    setRowField(row,'Product_Name',item.Product_Name||'');
+    setRowField(row,'SKU',item.SKU||'');
+    setRowField(row,'Catalog_ID',item.Catalog_ID||'');
+    setRowField(row,'Item_Source','Catalog');
+    row.dataset.catalogName=item.Product_Name||'';
+
+    if(!getRowField(row,'Unit_Price')&&hasDisplayValue(item.Default_Price)){
+      setRowField(row,'Unit_Price',item.Default_Price);
+    }
+
+    if(!getRowField(row,'Unit_Cost')&&hasDisplayValue(item.Default_Cost)){
+      setRowField(row,'Unit_Cost',item.Default_Cost);
+      setRowField(row,'Cost_Status','Estimated');
+      updateSaleCostLabel(row,'Estimated');
+    }
+
+    row.querySelector('[data-role="source-label"]').textContent='Catalog';
+    row.querySelector('[data-role="product-results"]').style.display='none';
+    recalcSale();
+  }
+
+  function useSaleItemAsAdhoc(rowId){
+    const row=[...document.querySelectorAll('.sale-item-row')].find(r=>r.dataset.row===String(rowId));
+    if(!row)return;
+    setRowField(row,'Catalog_ID','');
+    setRowField(row,'Inventory_ID','');
+    setRowField(row,'Item_Source','Ad-hoc');
+    row.dataset.catalogName='';
+    row.querySelector('[data-role="source-label"]').textContent='Ad-hoc';
+    row.querySelector('[data-role="product-results"]').style.display='none';
+  }
+
+  function saleProductChanged(input){
+    const row=input.closest('.sale-item-row');
+    if(row.dataset.catalogName&&input.value!==row.dataset.catalogName){
+      setRowField(row,'Catalog_ID','');
+      setRowField(row,'Item_Source','Ad-hoc');
+      row.querySelector('[data-role="source-label"]').textContent='Ad-hoc';
+    }
+  }
+
+  function saleCostChanged(input){
+    const row=input.closest('.sale-item-row');
+    const status=input.value.trim()===''?'Pending':'Known';
+    setRowField(row,'Cost_Status',status);
+    updateSaleCostLabel(row,status);
+  }
+
+  function updateSaleCostLabel(row,status){
+    const label=row.querySelector('[data-role="cost-label"]');
+    if(!label)return;
+    label.textContent=status==='Known'
+      ?'Actual cost recorded'
+      :status==='Estimated'
+        ?'Estimated cost — profit pending'
+        :'Unknown cost — profit pending';
+  }
+
+  function setRowField(row,field,value){
+    const el=row.querySelector(`[data-field="${field}"]`);
+    if(el)el.value=value??'';
+  }
+
+  function getRowField(row,field){
+    return row.querySelector(`[data-field="${field}"]`)?.value||'';
+  }
+
+  function hasDisplayValue(value){
+    return value!==''&&value!==null&&value!==undefined;
+  }
+
+  function openSaleCostEditor(item){
+    document.getElementById('saleCostForm').reset();
+    document.getElementById('saleCostItemId').value=item.Sales_Item_ID;
+    document.getElementById('saleCostUnitCost').value=hasDisplayValue(item.Unit_Cost)?item.Unit_Cost:'';
+    document.getElementById('saleCostTitle').textContent=`Actual cost · ${item.Product_Name||item.Sales_Item_ID}`;
+    document.getElementById('saleCostModal').classList.add('open');
+  }
+
+  async function submitSaleCost(e){
+    e.preventDefault();
+    showLoading(true);
+    try{
+      CURRENT_SALE=await server('updateSaleItemCost',formObject(e.target));
+      closeModal('saleCostModal');
+      renderSaleDetail(CURRENT_SALE);
+      toast('Actual item cost updated');
+      if(CURRENT_PAGE==='sales')await loadSales();
+    }catch(err){toast(err.message,true)}finally{showLoading(false)}
+  }
+
+  async function loadQuotes(){
+    const box=document.getElementById('quotesList');
+    if(!box)return;
+
+    try{
+      const rows=await server('listQuotes',{});
+      if(!rows.length){
+        box.innerHTML='<div class="empty" style="padding:18px">No quotes yet.</div>';
+        return;
+      }
+
+      box.innerHTML=`<div class="table-wrap"><table>
+        <thead><tr><th>Quote</th><th>Customer</th><th>Items</th><th>Pricing</th><th>Total</th><th>Status</th></tr></thead>
+        <tbody>${rows.slice(0,10).map(q=>`<tr class="clickable" onclick="openQuote('${escAttr(q.Quote_ID)}')">
+          <td><b>${esc(q.Quote_ID)}</b><br><span class="muted">${dateOnly(q.Date)}</span></td>
+          <td>${esc(q.Customer_Name)}<br><span class="muted">${esc(q.Customer_Phone)}</span></td>
+          <td>${esc(q.Item_Summary||`${q.Item_Count_Calc||0} item(s)`)}</td>
+          <td>${q.Pricing_Status==='Complete'?'<span class="status ready">Complete</span>':'<span class="status">Pending</span>'}</td>
+          <td class="money">${q.Pricing_Status==='Complete'?money(q.Total_Amount):'Pending'}</td>
+          <td>${statusBadge(q.Quote_Status)}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+    }catch(e){box.innerHTML=`<div class="empty">${esc(e.message)}</div>`}
+  }
+
+  function openNewQuote(){
+    CURRENT_QUOTE=null;
+    const form=document.getElementById('quoteForm');
+    form.reset();
+    document.getElementById('quoteId').value='';
+    document.getElementById('selectedQuoteCustomerId').value='';
+    document.getElementById('selectedQuoteCustomer').style.display='none';
+    document.getElementById('quoteCustomerResults').style.display='none';
+    document.getElementById('quoteItems').innerHTML='';
+    document.getElementById('quoteModalTitle').textContent='New Quote';
+    document.getElementById('quoteStatus').value='Pricing';
+    QUOTE_ITEM_SEQ=0;
+    addQuoteItemRow();
+    recalcQuote();
+    document.getElementById('quoteModal').classList.add('open');
+  }
+
+  function debouncedQuoteCustomerSearch(q){
+    clearTimeout(QUOTE_CUSTOMER_TIMER);
+    QUOTE_CUSTOMER_TIMER=setTimeout(()=>searchQuoteCustomerPicker(q),280);
+  }
+
+  async function searchQuoteCustomerPicker(q){
+    const box=document.getElementById('quoteCustomerResults');
+    if(!q.trim()){box.style.display='none';return;}
+
+    try{
+      const rows=await server('searchCustomerSources',q);
+      box.innerHTML=rows.length
+        ?rows.map(c=>{
+          const existing=c._Source==='Customer';
+          const badge=existing?'<span class="status ready">Customer</span>':'<span class="status">Contact</span>';
+          return `<div class="customer-result" onclick='selectQuoteCustomer(${JSON.stringify(c).replace(/'/g,"&#39;")})'>
+            <div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(c.Full_Name||'Unnamed')}</b>${badge}</div>
+            <span class="muted">${esc(c.Phone_Primary||c.Email||'')}</span>
+          </div>`;
+        }).join('')
+        :'<div class="customer-result muted">No match — enter details manually.</div>';
+      box.style.display='block';
+    }catch(e){toast(e.message,true)}
+  }
+
+  function selectQuoteCustomer(c){
+    const existing=c._Source==='Customer'&&c.Customer_ID;
+    document.getElementById('selectedQuoteCustomerId').value=existing?c.Customer_ID:'';
+    document.getElementById('quoteCustomerName').value=c.Full_Name||'';
+    document.getElementById('quoteCustomerPhone').value=c.Phone_Primary||'';
+    document.getElementById('quoteCustomerPhoneAlternate').value=c.Phone_Alternate||'';
+    document.getElementById('quoteCustomerEmail').value=c.Email||'';
+    document.getElementById('quoteCustomerAddress').value=c.Address||'';
+    document.getElementById('selectedQuoteCustomer').innerHTML=existing
+      ?`Using existing customer <b>${esc(c.Full_Name||'')}</b> · ${esc(c.Customer_ID)}`
+      :`Using contact <b>${esc(c.Full_Name||'')}</b>`;
+    document.getElementById('selectedQuoteCustomer').style.display='block';
+    document.getElementById('quoteCustomerResults').style.display='none';
+  }
+
+  function addQuoteItemRow(item={}){
+    QUOTE_ITEM_SEQ+=1;
+    const row=document.createElement('div');
+    row.className='card section quote-item-row';
+    row.style.marginBottom='10px';
+    row.dataset.row=String(QUOTE_ITEM_SEQ);
+    row.dataset.catalogName=item.Product_Name||'';
+
+    row.innerHTML=`
+      <div class="section-head"><div><h3>Item ${QUOTE_ITEM_SEQ}</h3><span class="muted" data-role="source-label">${esc(item.Item_Source||'Ad-hoc')}</span></div><button class="btn small" type="button" onclick="removeQuoteItemRow(this)">Remove</button></div>
+      <div class="form-grid">
+        <div class="full">
+          <label class="required">Product / requested item</label>
+          <input class="input" data-field="Product_Name" value="${escAttr(item.Product_Name||'')}" placeholder="Search catalog or type any requested item…" oninput="quoteProductChanged(this);debouncedQuoteProductSearch(this)">
+          <div class="customer-results" data-role="product-results"></div>
+          <input type="hidden" data-field="Catalog_ID" value="${escAttr(item.Catalog_ID||'')}">
+          <input type="hidden" data-field="Inventory_ID" value="${escAttr(item.Inventory_ID||'')}">
+          <input type="hidden" data-field="Item_Source" value="${escAttr(item.Item_Source||'Ad-hoc')}">
+        </div>
+        <div><label>SKU</label><input class="input" data-field="SKU" value="${escAttr(item.SKU||'')}"></div>
+        <div><label class="required">Quantity</label><input class="input" type="number" min="1" step="1" data-field="Quantity" value="${escAttr(item.Quantity||1)}" oninput="recalcQuote()"></div>
+        <div><label>Quoted unit price (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Price" value="${escAttr(item.Unit_Price??'')}" placeholder="Can be blank while sourcing" oninput="recalcQuote()"></div>
+        <div><label>Cost estimate (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Cost_Estimate" value="${escAttr(item.Unit_Cost_Estimate??'')}" placeholder="Optional"></div>
+        <div><label>IMEI / Serial</label><input class="input" data-field="IMEI_or_Serial" value="${escAttr(item.IMEI_or_Serial||'')}"></div>
+        <div class="full"><label style="display:flex;gap:8px;align-items:center;font-weight:700"><input type="checkbox" data-field="Save_to_Catalog"> Save this item to Catalog</label></div>
+        <div class="full"><label>Item notes</label><input class="input" data-field="Notes" value="${escAttr(item.Notes||'')}"></div>
+        <div class="full" style="text-align:right"><span class="muted">Line:</span> <b class="quote-line-total">${hasDisplayValue(item.Line_Total)?money(item.Line_Total):'Pending price'}</b></div>
+      </div>`;
+
+    document.getElementById('quoteItems').appendChild(row);
+    recalcQuote();
+  }
+
+  function removeQuoteItemRow(button){
+    const rows=document.querySelectorAll('.quote-item-row');
+    if(rows.length<=1){toast('A quote needs at least one item.',true);return;}
+    button.closest('.quote-item-row').remove();
+    recalcQuote();
+  }
+
+  function debouncedQuoteProductSearch(input){
+    clearTimeout(QUOTE_PRODUCT_TIMER);
+    QUOTE_PRODUCT_TIMER=setTimeout(()=>searchQuoteProductPicker(input),220);
+  }
+
+  async function searchQuoteProductPicker(input){
+    const row=input.closest('.quote-item-row');
+    const box=row.querySelector('[data-role="product-results"]');
+    const q=input.value.trim();
+    if(!q){box.style.display='none';return;}
+
+    try{
+      const items=await server('searchSalesProducts',q);
+      const rowId=row.dataset.row;
+      box.innerHTML=items.length
+        ?items.map(item=>`<div class="customer-result" onclick='selectQuoteCatalogItem("${escAttr(rowId)}",${JSON.stringify(item).replace(/'/g,"&#39;")})'>
+          <b>${esc(item.Product_Name)}</b><br><span class="muted">${esc(item.Catalog_ID)}${item.SKU?' · '+esc(item.SKU):''}${hasDisplayValue(item.Default_Price)?' · '+money(item.Default_Price):''}</span>
+        </div>`).join('')+`<div class="customer-result muted" onclick="useQuoteItemAsAdhoc('${escAttr(rowId)}')">Use typed item as ad-hoc</div>`
+        :`<div class="customer-result muted" onclick="useQuoteItemAsAdhoc('${escAttr(rowId)}')">No catalog match — keep as ad-hoc</div>`;
+      box.style.display='block';
+    }catch(e){toast(e.message,true)}
+  }
+
+  function selectQuoteCatalogItem(rowId,item){
+    const row=[...document.querySelectorAll('.quote-item-row')].find(r=>r.dataset.row===String(rowId));
+    if(!row)return;
+    setRowField(row,'Product_Name',item.Product_Name||'');
+    setRowField(row,'SKU',item.SKU||'');
+    setRowField(row,'Catalog_ID',item.Catalog_ID||'');
+    setRowField(row,'Item_Source','Catalog');
+    row.dataset.catalogName=item.Product_Name||'';
+    if(!getRowField(row,'Unit_Price')&&hasDisplayValue(item.Default_Price))setRowField(row,'Unit_Price',item.Default_Price);
+    if(!getRowField(row,'Unit_Cost_Estimate')&&hasDisplayValue(item.Default_Cost))setRowField(row,'Unit_Cost_Estimate',item.Default_Cost);
+    row.querySelector('[data-role="source-label"]').textContent='Catalog';
+    row.querySelector('[data-role="product-results"]').style.display='none';
+    recalcQuote();
+  }
+
+  function useQuoteItemAsAdhoc(rowId){
+    const row=[...document.querySelectorAll('.quote-item-row')].find(r=>r.dataset.row===String(rowId));
+    if(!row)return;
+    setRowField(row,'Catalog_ID','');
+    setRowField(row,'Inventory_ID','');
+    setRowField(row,'Item_Source','Ad-hoc');
+    row.dataset.catalogName='';
+    row.querySelector('[data-role="source-label"]').textContent='Ad-hoc';
+    row.querySelector('[data-role="product-results"]').style.display='none';
+  }
+
+  function quoteProductChanged(input){
+    const row=input.closest('.quote-item-row');
+    if(row.dataset.catalogName&&input.value!==row.dataset.catalogName){
+      setRowField(row,'Catalog_ID','');
+      setRowField(row,'Item_Source','Ad-hoc');
+      row.querySelector('[data-role="source-label"]').textContent='Ad-hoc';
+    }
+  }
+
+  function quoteItemsPayload(){
+    return [...document.querySelectorAll('.quote-item-row')].map(row=>{
+      const get=(field)=>row.querySelector(`[data-field="${field}"]`)?.value||'';
+      const checked=(field)=>!!row.querySelector(`[data-field="${field}"]`)?.checked;
+      return {
+        Item_Source:get('Item_Source')||'Ad-hoc',
+        Catalog_ID:get('Catalog_ID'),
+        Inventory_ID:get('Inventory_ID'),
+        SKU:get('SKU'),
+        Product_Name:get('Product_Name'),
+        Quantity:get('Quantity'),
+        Unit_Price:get('Unit_Price'),
+        Unit_Cost_Estimate:get('Unit_Cost_Estimate'),
+        IMEI_or_Serial:get('IMEI_or_Serial'),
+        Save_to_Catalog:checked('Save_to_Catalog'),
+        Notes:get('Notes'),
+      };
+    });
+  }
+
+  function recalcQuote(){
+    let subtotal=0;
+    let pending=false;
+
+    document.querySelectorAll('.quote-item-row').forEach(row=>{
+      const qty=num(getRowField(row,'Quantity'));
+      const raw=getRowField(row,'Unit_Price').trim();
+      const view=row.querySelector('.quote-line-total');
+      if(raw===''){
+        pending=true;
+        if(view)view.textContent='Pending price';
+      }else{
+        const line=qty*num(raw);
+        subtotal+=line;
+        if(view)view.textContent=money(line);
+      }
+    });
+
+    const discount=Math.max(0,num(document.getElementById('quoteDiscount')?.value));
+    document.getElementById('quotePricingView').textContent=pending?'Pending':'Complete';
+    document.getElementById('quoteSubtotalView').textContent=pending?'Pending':money(subtotal);
+    document.getElementById('quoteDiscountView').textContent=money(discount);
+    document.getElementById('quoteTotalView').textContent=pending?'Pending':money(Math.max(0,subtotal-discount));
+  }
+
+  async function submitQuote(e){
+    e.preventDefault();
+    const data=formObject(e.target);
+    data.Items=quoteItemsPayload();
+    showLoading(true);
+    try{
+      CURRENT_QUOTE=await server('saveQuote',data);
+      closeModal('quoteModal');
+      toast(`Saved ${CURRENT_QUOTE.quote.Quote_ID}`);
+      await loadQuotes();
+      renderQuoteDetail(CURRENT_QUOTE);
+      document.getElementById('quoteDetailModal').classList.add('open');
+    }catch(err){toast(err.message,true)}finally{showLoading(false)}
+  }
+
+  async function openQuote(id){
+    showLoading(true);
+    try{
+      CURRENT_QUOTE=await server('getQuote',id);
+      renderQuoteDetail(CURRENT_QUOTE);
+      document.getElementById('quoteDetailModal').classList.add('open');
+    }catch(e){toast(e.message,true)}finally{showLoading(false)}
+  }
+
+  function renderQuoteDetail(data){
+    const q=data.quote||{},c=data.customer||{},items=data.items||[];
+    document.getElementById('quoteDetailTitle').textContent=`${q.Quote_ID||'Quote'} · ${c.Full_Name||''}`;
+
+    document.getElementById('quoteDetailBody').innerHTML=`
+      <div class="repair-hero">
+        <div>
+          <div class="detail-list">
+            ${detail('Customer',`${esc(c.Full_Name||'')}<br><span class="muted">${esc(c.Phone_Primary||'')}</span>`)}
+            ${detail('Status',statusBadge(q.Quote_Status||''))}
+            ${detail('Pricing',q.Pricing_Status==='Complete'?'<span class="status ready">Complete</span>':'<span class="status">Pending</span>')}
+            ${detail('Valid until',dateOnly(q.Valid_Until)||'—')}
+            ${detail('Converted sale',q.Converted_Sales_ID?esc(q.Converted_Sales_ID):'—')}
+          </div>
+          <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
+            ${!q.Converted_Sales_ID?'<button class="btn" onclick="editCurrentQuote()">Edit Quote</button>':''}
+            ${q.Pricing_Status==='Complete'&&!q.Converted_Sales_ID&&!['Declined','Expired'].includes(q.Quote_Status)?'<button class="btn primary" onclick="convertCurrentQuote()">Convert to Sale</button>':''}
+            ${q.Converted_Sales_ID?`<button class="btn primary" onclick="openConvertedSale('${escAttr(q.Converted_Sales_ID)}')">Open Sale</button>`:''}
+          </div>
+        </div>
+        <div class="finance-box">
+          <div class="kpi-label" style="color:#bfd0df">Quote value</div>
+          <div class="finance-row"><span>Subtotal</span><b>${q.Pricing_Status==='Complete'?money(q.Subtotal):'Pending'}</b></div>
+          <div class="finance-row"><span>Discount</span><b>${money(q.Discount_Amount)}</b></div>
+          <div class="finance-row big"><span>Total</span><span>${q.Pricing_Status==='Complete'?money(q.Total_Amount):'Pending'}</span></div>
+        </div>
+      </div>
+      <div style="margin-top:24px" class="section-head"><h3>Items</h3></div>
+      ${quoteItemsTable(items)}
+      ${q.Notes?`<div style="margin-top:18px"><label>Notes</label><div>${nl2br(esc(q.Notes))}</div></div>`:''}`;
+  }
+
+  function quoteItemsTable(rows){
+    return `<div class="table-wrap"><table><thead><tr><th>Item</th><th>Source</th><th>Qty</th><th>Price</th><th>Cost estimate</th><th>IMEI / Serial</th></tr></thead><tbody>${rows.map(item=>`<tr>
+      <td><b>${esc(item.Product_Name)}</b><br><span class="muted">${esc(item.SKU||'')}</span></td>
+      <td>${esc(item.Item_Source||'Ad-hoc')}</td>
+      <td>${esc(item.Quantity)}</td>
+      <td class="money">${item.Price_Status==='Known'?money(item.Unit_Price):'Pending'}</td>
+      <td class="money">${hasDisplayValue(item.Unit_Cost_Estimate)?money(item.Unit_Cost_Estimate):'—'}</td>
+      <td>${esc(item.IMEI_or_Serial||'')}</td>
+    </tr>`).join('')}</tbody></table></div>`;
+  }
+
+  function editCurrentQuote(){
+    if(!CURRENT_QUOTE)return;
+    const q=CURRENT_QUOTE.quote,c=CURRENT_QUOTE.customer||{};
+    const form=document.getElementById('quoteForm');
+    form.reset();
+    document.getElementById('quoteModalTitle').textContent=`Edit ${q.Quote_ID}`;
+    document.getElementById('quoteId').value=q.Quote_ID;
+    document.getElementById('selectedQuoteCustomerId').value=c.Customer_ID||'';
+    document.getElementById('quoteCustomerName').value=c.Full_Name||'';
+    document.getElementById('quoteCustomerPhone').value=c.Phone_Primary||'';
+    document.getElementById('quoteCustomerPhoneAlternate').value=c.Phone_Alternate||'';
+    document.getElementById('quoteCustomerEmail').value=c.Email||'';
+    document.getElementById('quoteCustomerAddress').value=c.Address||'';
+    document.getElementById('selectedQuoteCustomer').innerHTML=`Using <b>${esc(c.Full_Name||'')}</b> · ${esc(c.Customer_ID||'')}`;
+    document.getElementById('selectedQuoteCustomer').style.display='block';
+    document.getElementById('quoteStatus').value=q.Quote_Status||'Pricing';
+    document.getElementById('quoteValidUntil').value=dateOnly(q.Valid_Until);
+    document.getElementById('quoteDiscount').value=q.Discount_Amount||0;
+    document.getElementById('quoteNotes').value=q.Notes||'';
+    document.getElementById('quoteItems').innerHTML='';
+    QUOTE_ITEM_SEQ=0;
+    (CURRENT_QUOTE.items||[]).forEach(item=>addQuoteItemRow(item));
+    recalcQuote();
+    closeModal('quoteDetailModal');
+    document.getElementById('quoteModal').classList.add('open');
+  }
+
+  async function convertCurrentQuote(){
+    if(!CURRENT_QUOTE)return;
+    if(!confirm(`Convert ${CURRENT_QUOTE.quote.Quote_ID} into a sale?`))return;
+    showLoading(true);
+    try{
+      CURRENT_SALE=await server('convertQuoteToSale',CURRENT_QUOTE.quote.Quote_ID);
+      closeModal('quoteDetailModal');
+      toast(`Created ${CURRENT_SALE.order.Sales_ID}`);
+      await Promise.all([loadQuotes(),loadSales()]);
+      renderSaleDetail(CURRENT_SALE);
+      document.getElementById('saleDetailModal').classList.add('open');
+    }catch(err){toast(err.message,true)}finally{showLoading(false)}
+  }
+
+  function openConvertedSale(id){
+    closeModal('quoteDetailModal');
+    openSale(id);
   }
 
   function renderFinancePage() {
