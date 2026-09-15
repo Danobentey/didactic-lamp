@@ -97,6 +97,7 @@
       .kpis,.form-grid{grid-template-columns:1fr}.detail-list{grid-template-columns:1fr}.toolbar{align-items:flex-start;flex-direction:column}
       .filters .input,.filters .select{width:100%}.filters{width:100%}.actions{width:100%}.actions .btn{flex:1}
     }
+    /* FIXXIR_UI_CLEANUP_V1 */
   </style>
 </head>
 <body>
@@ -162,12 +163,7 @@
           <div class="full"><label class="required">Reported issue</label><textarea class="textarea" name="Reported_Issue"></textarea></div>
           <div class="full"><label>Physical condition at intake</label><textarea class="textarea" name="Physical_Condition"></textarea></div>
           <div><label>Technician</label><select class="select" name="Technician_ID" id="repairTechnician"></select></div>
-          <div><label>Priority</label><select class="select" name="Priority" id="repairPriority"></select></div>
-          <div><label>Expected completion</label><input class="input" type="date" name="Expected_Completion"></div>
-          <div><label>Quoted amount (₦)</label><input class="input" type="number" min="0" step="1" name="Quoted_Amount"></div>
-          <div><label>Warranty days</label><input class="input" type="number" min="0" name="Warranty_Days"></div>
-          <div><label>Collection method</label><select class="select" name="Collection_Method"><option value="">Select</option><option>Pickup</option><option>Delivery</option><option>Courier</option><option>Other</option></select></div>
-          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+<div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
         </div>
       </div>
       <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('repairModal')">Cancel</button><button class="btn primary" type="submit">Create repair</button></div>
@@ -204,22 +200,7 @@
             <select class="select" name="Repair_Status" id="editRepairStatus"></select>
           </div>
 
-          <div>
-            <label>Priority</label>
-            <select class="select" name="Priority" id="editRepairPriority"></select>
-          </div>
-
-          <div>
-            <label>Expected completion</label>
-            <input class="input" type="date" name="Expected_Completion" id="editRepairExpected">
-          </div>
-
-          <div>
-            <label>Quoted amount (₦)</label>
-            <input class="input" type="number" min="0" step="1" name="Quoted_Amount" id="editRepairQuoted">
-          </div>
-
-          <div>
+<div>
             <label>Final amount (₦)</label>
             <input class="input" type="number" min="0" step="1" name="Final_Amount" id="editRepairFinal">
           </div>
@@ -229,23 +210,7 @@
             <select class="select" name="QA_Status" id="editRepairQA"></select>
           </div>
 
-          <div>
-            <label>Warranty days</label>
-            <input class="input" type="number" min="0" name="Warranty_Days" id="editRepairWarranty">
-          </div>
-
-          <div>
-            <label>Collection method</label>
-            <select class="select" name="Collection_Method" id="editRepairCollection">
-              <option value="">Select</option>
-              <option>Pickup</option>
-              <option>Delivery</option>
-              <option>Courier</option>
-              <option>Other</option>
-            </select>
-          </div>
-
-          <div>
+<div>
             <label>Date completed</label>
             <input class="input" type="date" name="Date_Completed" id="editRepairCompleted">
           </div>
@@ -305,17 +270,12 @@
 
         <div class="form-grid" style="margin-top:20px">
           <div><label>Discount (₦)</label><input class="input" id="saleDiscount" type="number" min="0" step="1" name="Discount_Amount" value="0" oninput="recalcSale()"></div>
-          <div><label>Initial payment (₦)</label><input class="input" id="saleInitialPayment" type="number" min="0" step="1" name="Initial_Payment" value="0" oninput="recalcSale()"></div>
-          <div><label>Payment method</label><select class="select" name="Payment_Method" id="salePaymentMethod"></select></div>
-          <div><label>Receipt / bank reference</label><input class="input" name="Receipt_Reference"></div>
-          <div class="full">
+<div class="full">
             <div class="finance-box">
               <div class="finance-row"><span>Subtotal</span><b id="saleSubtotalView">₦0</b></div>
               <div class="finance-row"><span>Discount</span><b id="saleDiscountView">₦0</b></div>
               <div class="finance-row big"><span>Total</span><span id="saleTotalView">₦0</span></div>
-              <div class="finance-row"><span>Initial payment</span><b id="salePaidView">₦0</b></div>
-              <div class="finance-row"><span>Balance</span><b id="saleBalanceView">₦0</b></div>
-            </div>
+</div>
           </div>
           <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
         </div>
@@ -502,7 +462,6 @@
 
   function populateStaticSelects() {
     fillSelect('repairDeviceType', BOOT.settings.Device_Type || [], 'Select device type');
-    fillSelect('repairPriority', BOOT.settings.Priority || ['Normal'], 'Select priority');
     fillSelect('repairTechnician', BOOT.technicians.map(t => ({value:t.Technician_ID,label:t.Full_Name})), 'Unassigned');
     fillSelect('financePaymentMethod', BOOT.settings.Payment_Method || [], 'Select method');
     fillSelect('financeCategory', BOOT.settings.Finance_Category || [], 'Select category');
@@ -552,8 +511,8 @@
 
   function repairMiniTable(rows) {
     if (!rows.length) return `<div class="empty">No repairs yet. Create the first repair.</div>`;
-    return `<div class="table-wrap"><table><thead><tr><th>Repair</th><th>Customer</th><th>Device</th><th>Status</th><th>Priority</th></tr></thead><tbody>
-      ${rows.map(r => `<tr class="clickable" onclick="openRepair('${escAttr(r.Repair_ID)}')"><td><b>${esc(r.Repair_ID)}</b><br><span class="muted">${dateOnly(r.Date_Received)}</span></td><td>${esc(r.Customer_Name)}</td><td>${esc(r.Device)}</td><td>${statusBadge(r.Repair_Status)}</td><td>${r.Priority==='Urgent'?'<span class="status urgent">Urgent</span>':esc(r.Priority||'')}</td></tr>`).join('')}
+    return `<div class="table-wrap"><table><thead><tr><th>Repair</th><th>Customer</th><th>Device</th><th>Status</th></tr></thead><tbody>
+      ${rows.map(r => `<tr class="clickable" onclick="openRepair('${escAttr(r.Repair_ID)}')"><td><b>${esc(r.Repair_ID)}</b><br><span class="muted">${dateOnly(r.Date_Received)}</span></td><td>${esc(r.Customer_Name)}</td><td>${esc(r.Device)}</td><td>${statusBadge(r.Repair_Status)}</td></tr>`).join('')}
     </tbody></table></div>`;
   }
 
@@ -661,7 +620,7 @@
         <div id="quotesList"><div class="empty">Loading quotes…</div></div>
       </div>
       <div class="filters" style="margin-bottom:14px">
-        <input class="input" id="salesQ" placeholder="Search sale, customer, IMEI, serial, SKU…" oninput="debouncedSalesLoad()">
+        <input class="input" id="salesQ" placeholder="Search sale, customer, IMEI or serial…" oninput="debouncedSalesLoad()">
         <select class="select" id="salesStatus" onchange="loadSales()">
           <option value="">All statuses</option>
           <option>Pending Fulfilment</option><option>Completed</option><option>Draft</option><option>Cancelled</option>
@@ -739,7 +698,6 @@
     SALE_ITEM_SEQ=0;
     addSaleItemRow();
 
-    fillSelect('salePaymentMethod',BOOT.settings.Payment_Method||[],'Select method');
     recalcSale();
     document.getElementById('saleModal').classList.add('open');
   }
@@ -820,8 +778,7 @@
           <input type="hidden" data-field="Item_Source" value="${escAttr(item.Item_Source||'Ad-hoc')}">
           <input type="hidden" data-field="Cost_Status" value="${escAttr(initialCostStatus)}">
         </div>
-        <div><label>SKU</label><input class="input" data-field="SKU" value="${escAttr(item.SKU||'')}"></div>
-        <div><label class="required">Quantity</label><input class="input" type="number" min="1" step="1" data-field="Quantity" value="${escAttr(item.Quantity||1)}" oninput="recalcSale()"></div>
+<div><label class="required">Quantity</label><input class="input" type="number" min="1" step="1" data-field="Quantity" value="${escAttr(item.Quantity||1)}" oninput="recalcSale()"></div>
         <div><label class="required">Selling price (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Price" value="${escAttr(item.Unit_Price??'')}" oninput="recalcSale()"></div>
         <div>
           <label>Actual unit cost (₦)</label>
@@ -884,14 +841,9 @@
 
     const discount=Math.max(0,num(document.getElementById('saleDiscount')?.value));
     const total=Math.max(0,subtotal-discount);
-    const paid=Math.max(0,num(document.getElementById('saleInitialPayment')?.value));
-    const balance=Math.max(0,total-paid);
-
     if(document.getElementById('saleSubtotalView'))document.getElementById('saleSubtotalView').textContent=money(subtotal);
     if(document.getElementById('saleDiscountView'))document.getElementById('saleDiscountView').textContent=money(discount);
     if(document.getElementById('saleTotalView'))document.getElementById('saleTotalView').textContent=money(total);
-    if(document.getElementById('salePaidView'))document.getElementById('salePaidView').textContent=money(paid);
-    if(document.getElementById('saleBalanceView'))document.getElementById('saleBalanceView').textContent=money(balance);
   }
 
   async function submitSale(e){
@@ -902,12 +854,6 @@
 
     if(!data.Items.length){
       toast('Add at least one item.',true);
-      return;
-    }
-
-    const payment=num(data.Initial_Payment);
-    if(payment>0&&!data.Payment_Method){
-      toast('Select a payment method for the initial payment.',true);
       return;
     }
 
@@ -996,7 +942,6 @@
       <tbody>${rows.map(item=>`<tr>
         <td><b>${esc(item.Product_Name)}</b></td>
         <td>${esc(item.Item_Source||'Ad-hoc')}</td>
-        <td>${esc(item.SKU||'')}</td>
         <td>${esc(item.IMEI_or_Serial||'')}</td>
         <td>${esc(item.Quantity)}</td>
         <td class="money">${money(item.Unit_Price)}</td>
@@ -1270,8 +1215,7 @@
           <input type="hidden" data-field="Inventory_ID" value="${escAttr(item.Inventory_ID||'')}">
           <input type="hidden" data-field="Item_Source" value="${escAttr(item.Item_Source||'Ad-hoc')}">
         </div>
-        <div><label>SKU</label><input class="input" data-field="SKU" value="${escAttr(item.SKU||'')}"></div>
-        <div><label class="required">Quantity</label><input class="input" type="number" min="1" step="1" data-field="Quantity" value="${escAttr(item.Quantity||1)}" oninput="recalcQuote()"></div>
+<div><label class="required">Quantity</label><input class="input" type="number" min="1" step="1" data-field="Quantity" value="${escAttr(item.Quantity||1)}" oninput="recalcQuote()"></div>
         <div><label>Quoted unit price (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Price" value="${escAttr(item.Unit_Price??'')}" placeholder="Can be blank while sourcing" oninput="recalcQuote()"></div>
         <div><label>Cost estimate (₦)</label><input class="input" type="number" min="0" step="1" data-field="Unit_Cost_Estimate" value="${escAttr(item.Unit_Cost_Estimate??'')}" placeholder="Optional"></div>
         <div><label>IMEI / Serial</label><input class="input" data-field="IMEI_or_Serial" value="${escAttr(item.IMEI_or_Serial||'')}"></div>
@@ -1609,9 +1553,7 @@
             ${detail('Device',[r.Device_Type,r.Brand,r.Model].filter(Boolean).join(' · '))}
             ${detail('Technician',t.Full_Name||'Unassigned')}
             ${detail('IMEI / Serial',[r.IMEI_1,r.Serial_Number].filter(Boolean).join(' · ')||'—')}
-            ${detail('Priority',r.Priority||'—')}
             ${detail('Received',dateOnly(r.Date_Received))}
-            ${detail('Expected',dateOnly(r.Expected_Completion)||'—')}
           </div>
           <div style="margin-top:18px"><label>Reported issue</label><div>${nl2br(esc(r.Reported_Issue||'—'))}</div></div>
           <div style="margin-top:14px"><label>Diagnosis</label><div>${nl2br(esc(r.Diagnosis||'Not yet recorded'))}</div></div>
@@ -1659,12 +1601,6 @@
     );
 
     fillSelect(
-      'editRepairPriority',
-      BOOT.settings.Priority || [],
-      'Select priority'
-    );
-
-    fillSelect(
       'editRepairQA',
       BOOT.settings.QA_Status || [],
       'Select QA status'
@@ -1672,16 +1608,9 @@
 
     document.getElementById('editRepairTechnician').value = r.Technician_ID || '';
     document.getElementById('editRepairStatus').value = r.Repair_Status || '';
-    document.getElementById('editRepairPriority').value = r.Priority || '';
-    document.getElementById('editRepairExpected').value = dateOnly(r.Expected_Completion);
-    document.getElementById('editRepairQuoted').value =
-      r.Quoted_Amount === null || r.Quoted_Amount === undefined ? '' : r.Quoted_Amount;
     document.getElementById('editRepairFinal').value =
       r.Final_Amount === null || r.Final_Amount === undefined ? '' : r.Final_Amount;
     document.getElementById('editRepairQA').value = r.QA_Status || '';
-    document.getElementById('editRepairWarranty').value =
-      r.Warranty_Days === null || r.Warranty_Days === undefined ? '' : r.Warranty_Days;
-    document.getElementById('editRepairCollection').value = r.Collection_Method || '';
     document.getElementById('editRepairCompleted').value = dateOnly(r.Date_Completed);
     document.getElementById('editRepairDiagnosis').value = r.Diagnosis || '';
     document.getElementById('editRepairQANotes').value = r.QA_Notes || '';
