@@ -26,6 +26,7 @@ const FIXXIR = Object.freeze({
     quotes: "Quotes",
     quoteItems: "Quote_Items",
     finance: "Finance_Ledger",
+    entityNotes: "Entity_Notes",
     contacts: "Contacts",
     settings: "Settings",
   },
@@ -48,6 +49,7 @@ const FIXXIR = Object.freeze({
     Quotes: "QUO",
     Quote_Items: "QIT",
     Finance_Ledger: "TXN",
+    Entity_Notes: "NTE",
   },
   closedRepairStatuses: ["Completed", "Cancelled", "Returned Unrepaired"],
 });
@@ -240,6 +242,19 @@ const FIXXIR_PURCHASE_EXPENSE_HEADERS = Object.freeze([
   "Notes",
 ]);
 
+
+/* FIXXIR_ENTITY_NOTES_V1 */
+
+const FIXXIR_ENTITY_NOTE_HEADERS = Object.freeze([
+  "Note_ID",
+  "Reference_Type",
+  "Reference_ID",
+  "Note_Date",
+  "Note",
+  "Created_At",
+  "Created_By",
+]);
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile("Index")
     .setTitle("Fixxir Operations")
@@ -287,6 +302,7 @@ function initializeFixxir(spreadsheetId) {
   ensureSalesSheets_(ss);
   ensureProcurementSchema_(ss);
   ensureRepairDateSchema_(ss);
+  ensureEntityNotesSheet_(ss);
 
   const requiredSheets = Object.values(FIXXIR.sheets);
   const missing = requiredSheets.filter((name) => !ss.getSheetByName(name));
@@ -451,6 +467,8 @@ function getRepair(repairId) {
       )
     : null;
 
+  const entityNotes = getEntityNotes_("Repair", id);
+
   const transactions = getRecords_(FIXXIR.sheets.finance)
     .filter(
       (t) =>
@@ -474,6 +492,7 @@ function getRepair(repairId) {
     repair,
     customer,
     technician,
+    notes: entityNotes,
     transactions,
     summary: {
       revenue: finalAmount,
@@ -2227,6 +2246,8 @@ function getPurchase(purchaseId) {
   const items = getRecords_(FIXXIR.sheets.purchaseItems)
     .filter((item) => item.Purchase_ID === id);
 
+  const entityNotes = getEntityNotes_("Purchase", id);
+
   const expenses = getRecords_(FIXXIR.sheets.purchaseExpenses)
     .filter((expense) => expense.Purchase_ID === id);
 
@@ -2235,6 +2256,7 @@ function getPurchase(purchaseId) {
     supplier,
     items,
     expenses,
+    notes: entityNotes,
   };
 }
 
@@ -3027,6 +3049,110 @@ function getDashboardData_() {
     netToday: todayCredits - todayDebits,
     recentRepairs: recent,
   };
+}
+
+
+/* ---------------- Repair / Purchase Notes ---------------- */
+
+function addEntityNote(payload) {
+  assertAuthorized_();
+  ensureEntityNotesSheet_(getSpreadsheet_());
+
+  payload = payload || {};
+
+  const referenceType = clean_(payload.Reference_Type);
+  const referenceId = clean_(payload.Reference_ID);
+  const note = clean_(payload.Note);
+
+  if (!["Repair", "Purchase"].includes(referenceType)) {
+    throw new Error("Notes can currently be added only to Repairs or Purchases.");
+  }
+
+  if (!referenceId) throw new Error("Reference ID is required.");
+  if (!note) throw new Error("Note cannot be empty.");
+
+  if (
+    referenceType === "Repair" &&
+    !findById_(FIXXIR.sheets.repairs, "Repair_ID", referenceId)
+  ) {
+    throw new Error("Repair not found: " + referenceId);
+  }
+
+  if (
+    referenceType === "Purchase" &&
+    !findById_(FIXXIR.sheets.purchases, "Purchase_ID", referenceId)
+  ) {
+    throw new Error("Purchase not found: " + referenceId);
+  }
+
+  const now = new Date();
+  const noteId = generateId_(FIXXIR.sheets.entityNotes);
+
+  appendRecord_(FIXXIR.sheets.entityNotes, {
+    Note_ID: noteId,
+    Reference_Type: referenceType,
+    Reference_ID: referenceId,
+    Note_Date: now,
+    Note: note,
+    Created_At: now,
+    Created_By: currentUser_(),
+  });
+
+  return {
+    ok: true,
+    note: findById_(FIXXIR.sheets.entityNotes, "Note_ID", noteId),
+  };
+}
+
+function getEntityNotes_(referenceType, referenceId) {
+  ensureEntityNotesSheet_(getSpreadsheet_());
+
+  return getRecords_(FIXXIR.sheets.entityNotes)
+    .filter(
+      (row) =>
+        row.Reference_Type === referenceType &&
+        row.Reference_ID === referenceId,
+    )
+    .sort((a, b) => {
+      const dateCmp = String(b.Note_Date || "").localeCompare(
+        String(a.Note_Date || ""),
+      );
+      if (dateCmp) return dateCmp;
+      return String(b.Note_ID || "").localeCompare(String(a.Note_ID || ""));
+    });
+}
+
+function ensureEntityNotesSheet_(ss) {
+  ss = ss || getSpreadsheet_();
+
+  let sh = ss.getSheetByName(FIXXIR.sheets.entityNotes);
+  if (!sh) sh = ss.insertSheet(FIXXIR.sheets.entityNotes);
+
+  const lastCol = sh.getLastColumn();
+
+  if (!lastCol) {
+    sh.getRange(1, 1, 1, FIXXIR_ENTITY_NOTE_HEADERS.length).setValues([
+      FIXXIR_ENTITY_NOTE_HEADERS,
+    ]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+
+  const existingHeaders = sh
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map((header) => String(header || "").trim());
+
+  const missing = FIXXIR_ENTITY_NOTE_HEADERS.filter(
+    (header) => !existingHeaders.includes(header),
+  );
+
+  if (missing.length) {
+    sh.getRange(1, lastCol + 1, 1, missing.length).setValues([missing]);
+  }
+
+  sh.setFrozenRows(1);
+  return sh;
 }
 
 /* ---------------- Data helpers ---------------- */

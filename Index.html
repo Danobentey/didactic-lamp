@@ -1325,6 +1325,38 @@
   </div>
 </div>
 
+<div class="modal" id="entityNoteModal">
+  <div class="modal-box" style="width:min(650px,100%)">
+    <div class="modal-head">
+      <h3 id="entityNoteTitle">Add Note</h3>
+      <button class="close" onclick="closeModal('entityNoteModal')">×</button>
+    </div>
+    <form id="entityNoteForm" onsubmit="submitEntityNote(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Reference_Type" id="entityNoteType">
+        <input type="hidden" name="Reference_ID" id="entityNoteReferenceId">
+
+        <div class="form-grid">
+          <div class="full">
+            <label class="required">Note</label>
+            <textarea class="textarea" name="Note" id="entityNoteBody" required
+              placeholder="Add an update, observation, vendor conversation, repair progress note, etc."></textarea>
+          </div>
+        </div>
+
+        <div class="muted" style="font-size:12px;margin-top:10px">
+          Notes are timestamped and appended to the record history. Existing notes are not overwritten.
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn" onclick="closeModal('entityNoteModal')">Cancel</button>
+        <button class="btn primary" type="submit">Add note</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="modal" id="financeModal">
       <div class="modal-box" style="width: min(650px, 100%)">
         <div class="modal-head">
@@ -3077,6 +3109,9 @@
             ${detail('Created at',p.Created_At?dateOnly(p.Created_At):'—')}
             ${detail('Cost status',p.Cost_Status==='Known'?'<span class="status ready">Known</span>':'<span class="status">Pending</span>')}
           </div>
+          <div style="margin-top:18px">
+            <button class="btn" onclick="openEntityNote('Purchase',CURRENT_PURCHASE?.purchase?.Purchase_ID)">+ Add Note</button>
+          </div>
         </div>
         <div class="finance-box">
           <div class="kpi-label" style="color:#bfd0df">Landed cost</div>
@@ -3088,6 +3123,12 @@
 
       <div style="margin-top:24px" class="section-head"><h3>Purchased items</h3></div>
       ${purchaseItemsTable(items)}
+
+      <div style="margin-top:24px" class="section-head">
+        <h3>Notes</h3>
+        <button class="btn small" onclick="openEntityNote('Purchase',CURRENT_PURCHASE?.purchase?.Purchase_ID)">+ Add Note</button>
+      </div>
+      ${entityNotesView(data.notes||[],p.Notes||'')}
 
       <div style="margin-top:24px" class="section-head"><h3>Shared costs</h3></div>
       ${purchaseExpensesTable(expenses)}
@@ -3348,6 +3389,7 @@
           <div style="margin-top:14px"><label>Diagnosis</label><div>${nl2br(esc(r.Diagnosis || "Not yet recorded"))}</div></div>
           <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn dark" onclick="openRepairEdit()">Edit Repair</button>
+            <button class="btn" onclick="openEntityNote('Repair',CURRENT_REPAIR?.repair?.Repair_ID)">+ Add Note</button>
             <button class="btn primary" onclick="openFinanceForRepair('Credit')">+ Customer Payment</button>
             <button class="btn" onclick="openFinanceForRepair('Debit')">+ Repair Expense</button>
           </div>
@@ -3361,6 +3403,12 @@
           <div class="finance-row big"><span>Gross profit</span><span>${money(s.grossProfit)}</span></div>
         </div>
       </div>
+
+      <div style="margin-top:24px" class="section-head">
+        <h3>Notes</h3>
+        <button class="btn small" onclick="openEntityNote('Repair',CURRENT_REPAIR?.repair?.Repair_ID)">+ Add Note</button>
+      </div>
+      ${entityNotesView(data.notes||[],r.Notes||'')}
       <div style="margin-top:24px" class="section-head"><h3>Transactions</h3></div>
       ${transactionTable(data.transactions || [])}`;
       }
@@ -3451,7 +3499,100 @@
         return `<div class="detail-item"><div class="label">${esc(label)}</div><div class="value">${value}</div></div>`;
       }
 
-      function transactionTable(rows) {
+      /* FIXXIR_ENTITY_NOTES_UI_V1 */
+
+  function openEntityNote(referenceType,referenceId){
+    if(!referenceType||!referenceId){
+      toast('Open a repair or purchase first.',true);
+      return;
+    }
+
+    const form=document.getElementById('entityNoteForm');
+    form.reset();
+
+    document.getElementById('entityNoteType').value=referenceType;
+    document.getElementById('entityNoteReferenceId').value=referenceId;
+    document.getElementById('entityNoteTitle').textContent=
+      `Add note · ${referenceId}`;
+
+    document.getElementById('entityNoteModal').classList.add('open');
+
+    setTimeout(()=>{
+      document.getElementById('entityNoteBody')?.focus();
+    },50);
+  }
+
+  async function submitEntityNote(e){
+    e.preventDefault();
+    const data=formObject(e.target);
+
+    showLoading(true);
+    try{
+      await server('addEntityNote',data);
+      closeModal('entityNoteModal');
+
+      if(data.Reference_Type==='Repair'){
+        CURRENT_REPAIR=await server('getRepair',data.Reference_ID);
+        renderRepairDetail(CURRENT_REPAIR);
+      }
+
+      if(data.Reference_Type==='Purchase'){
+        CURRENT_PURCHASE=await server('getPurchase',data.Reference_ID);
+        renderPurchaseDetail(CURRENT_PURCHASE);
+      }
+
+      toast('Note added');
+    }catch(err){
+      toast(err.message,true);
+    }finally{
+      showLoading(false);
+    }
+  }
+
+  function entityNotesView(rows,originalNote){
+    const blocks=[];
+
+    if(originalNote){
+      blocks.push(`
+        <div class="card section" style="margin-bottom:10px;box-shadow:none">
+          <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:7px">
+            <b>Original record note</b>
+            <span class="muted" style="font-size:11px">Created with record</span>
+          </div>
+          <div>${nl2br(esc(originalNote))}</div>
+        </div>`);
+    }
+
+    (rows||[]).forEach(note=>{
+      blocks.push(`
+        <div class="card section" style="margin-bottom:10px;box-shadow:none">
+          <div style="display:flex;justify-content:space-between;gap:12px;margin-bottom:7px;flex-wrap:wrap">
+            <b>${esc(note.Created_By||'Fixxir staff')}</b>
+            <span class="muted" style="font-size:11px">${formatDateTime(note.Note_Date||note.Created_At)}</span>
+          </div>
+          <div>${nl2br(esc(note.Note||''))}</div>
+        </div>`);
+    });
+
+    return blocks.length
+      ? blocks.join('')
+      : '<div class="empty" style="padding:16px">No notes yet.</div>';
+  }
+
+  function formatDateTime(value){
+    if(!value)return '—';
+    const d=new Date(value);
+    if(Number.isNaN(d.getTime()))return esc(String(value));
+    return d.toLocaleString('en-NG',{
+      year:'numeric',
+      month:'short',
+      day:'2-digit',
+      hour:'2-digit',
+      minute:'2-digit'
+    });
+  }
+
+  function transactionTable(rows) {
         if (!rows.length)
           return '<div class="empty" style="padding:16px">No financial transactions yet.</div>';
         return `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Transaction</th><th>Category</th><th>Description</th><th>Amount</th><th>Method</th></tr></thead><tbody>${rows.map((t) => `<tr><td>${dateOnly(t.Date)}</td><td>${esc(t.Transaction_ID)}<br><span class="status">${esc(t.Transaction_Type)}</span></td><td>${esc(t.Category)}</td><td>${esc(t.Description)}</td><td class="money">${t.Transaction_Type === "Debit" ? "- " : "+ "}${money(t.Amount)}</td><td>${esc(t.Payment_Method)}</td></tr>`).join("")}</tbody></table></div>`;
