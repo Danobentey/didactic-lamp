@@ -26,6 +26,9 @@ const FIXXIR = Object.freeze({
     quotes: "Quotes",
     quoteItems: "Quote_Items",
     finance: "Finance_Ledger",
+    generalExpenses: "General_Expenses",
+    settlements: "Settlements",
+    settlementAllocations: "Settlement_Allocations",
     entityNotes: "Entity_Notes",
     contacts: "Contacts",
     settings: "Settings",
@@ -49,6 +52,9 @@ const FIXXIR = Object.freeze({
     Quotes: "QUO",
     Quote_Items: "QIT",
     Finance_Ledger: "TXN",
+    General_Expenses: "GEX",
+    Settlements: "STL",
+    Settlement_Allocations: "STA",
     Entity_Notes: "NTE",
   },
   closedRepairStatuses: ["Completed", "Cancelled", "Returned Unrepaired"],
@@ -255,6 +261,61 @@ const FIXXIR_ENTITY_NOTE_HEADERS = Object.freeze([
   "Created_By",
 ]);
 
+
+/* FIXXIR_FINANCE_OPS_V1 */
+
+const FIXXIR_GENERAL_EXPENSE_HEADERS = Object.freeze([
+  "General_Expense_ID",
+  "Expense_Date",
+  "Category",
+  "Description",
+  "Amount",
+  "Payment_Method",
+  "Account",
+  "Payee",
+  "Supplier_ID",
+  "Reference_Type",
+  "Reference_ID",
+  "Repair_ID",
+  "Purchase_ID",
+  "Finance_Transaction_ID",
+  "Created_At",
+  "Created_By",
+  "Notes",
+]);
+
+const FIXXIR_SETTLEMENT_HEADERS = Object.freeze([
+  "Settlement_ID",
+  "Settlement_Date",
+  "Payee_Type",
+  "Payee_ID",
+  "Payee_Name",
+  "Amount",
+  "Allocated_Amount",
+  "Unallocated_Amount",
+  "Payment_Method",
+  "Account",
+  "Payment_Reference",
+  "Finance_Transaction_ID",
+  "Created_At",
+  "Created_By",
+  "Notes",
+]);
+
+const FIXXIR_SETTLEMENT_ALLOCATION_HEADERS = Object.freeze([
+  "Settlement_Allocation_ID",
+  "Settlement_ID",
+  "Settlement_Date",
+  "Payee_Type",
+  "Payee_ID",
+  "Reference_Type",
+  "Reference_ID",
+  "Amount",
+  "Created_At",
+  "Created_By",
+  "Notes",
+]);
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile("Index")
     .setTitle("Fixxir Operations")
@@ -303,6 +364,8 @@ function initializeFixxir(spreadsheetId) {
   ensureProcurementSchema_(ss);
   ensureRepairDateSchema_(ss);
   ensureEntityNotesSheet_(ss);
+
+  ensureFinanceOperationsSchema_(ss);
 
   const requiredSheets = Object.values(FIXXIR.sheets);
   const missing = requiredSheets.filter((name) => !ss.getSheetByName(name));
@@ -394,6 +457,7 @@ function listRepairs(filters) {
     "Technician_ID",
   );
   const financeSummary = buildRepairFinanceMap_();
+  addSettlementRepairCostsToFinanceMap_(financeSummary);
 
   let rows = repairs.map((r) => {
     const fs = financeSummary[r.Repair_ID] || { credits: 0, debits: 0 };
@@ -485,6 +549,15 @@ function getRepair(repairId) {
     .filter((t) => t.Transaction_Type === "Debit")
     .reduce((s, t) => s + number_(t.Amount), 0);
 
+  const settlementAllocations = getSettlementAllocationsFor_(
+    "Repair",
+    id,
+  );
+  const settlementCosts = settlementAllocations.reduce(
+    (sum, row) => sum + number_(row.Amount),
+    0,
+  );
+
   const finalAmount =
     number_(repair.Final_Amount) || number_(repair.Quoted_Amount);
 
@@ -494,12 +567,14 @@ function getRepair(repairId) {
     technician,
     notes: entityNotes,
     transactions,
+    settlementAllocations,
     summary: {
       revenue: finalAmount,
       paid: credits,
       balance: Math.max(0, finalAmount - credits),
-      directCost: debits,
-      grossProfit: finalAmount - debits,
+      directCost: debits + settlementCosts,
+      settlementCosts,
+      grossProfit: finalAmount - debits - settlementCosts,
     },
   };
 }
@@ -2251,11 +2326,27 @@ function getPurchase(purchaseId) {
   const expenses = getRecords_(FIXXIR.sheets.purchaseExpenses)
     .filter((expense) => expense.Purchase_ID === id);
 
+  const settlementAllocations = getSettlementAllocationsFor_(
+    "Purchase",
+    id,
+  );
+  const supplierSettled = settlementAllocations
+    .filter((row) => row.Payee_Type === "Vendor")
+    .reduce((sum, row) => sum + number_(row.Amount), 0);
+  const supplierDue = number_(purchase.Items_Subtotal);
+
   return {
     purchase,
     supplier,
     items,
     expenses,
+    settlementAllocations,
+    settlementSummary: {
+      supplierDue,
+      supplierSettled,
+      supplierBalance: Math.max(0, supplierDue - supplierSettled),
+      supplierOverpaid: Math.max(0, supplierSettled - supplierDue),
+    },
     notes: entityNotes,
   };
 }
@@ -3153,6 +3244,603 @@ function ensureEntityNotesSheet_(ss) {
 
   sh.setFrozenRows(1);
   return sh;
+}
+
+
+/* ---------------- General Expenses / Bulk Settlements ---------------- */
+
+function getFinanceOperationsData(filters) {
+  assertAuthorized_();
+  ensureFinanceOperationsSchema_(getSpreadsheet_());
+
+  filters = filters || {};
+
+  return {
+    generalExpenses: listGeneralExpenses_(filters),
+    settlements: listSettlements_(filters),
+    summary: getFinanceOperationsSummary_(),
+  };
+}
+
+function createGeneralExpense(payload) {
+  assertAuthorized_();
+  ensureFinanceOperationsSchema_(getSpreadsheet_());
+
+  payload = payload || {};
+  requireFields_(payload, [
+    "Expense_Date",
+    "Category",
+    "Description",
+    "Amount",
+    "Payment_Method",
+  ]);
+
+  const expenseDate = parseDate_(payload.Expense_Date);
+  if (!expenseDate) throw new Error("Expense date is required.");
+
+  const amount = number_(payload.Amount);
+  if (!(amount > 0)) throw new Error("Expense amount must be greater than zero.");
+
+  const referenceType = clean_(payload.Reference_Type);
+  const referenceId = clean_(payload.Reference_ID);
+
+  if (referenceType && !["Repair", "Purchase"].includes(referenceType)) {
+    throw new Error("Expense link must be Repair, Purchase, or blank.");
+  }
+
+  let repairId = "";
+  let purchaseId = "";
+
+  if (referenceType === "Repair") {
+    repairId = referenceId;
+    if (!repairId) throw new Error("Enter the Repair ID to link this expense.");
+    if (!findById_(FIXXIR.sheets.repairs, "Repair_ID", repairId)) {
+      throw new Error("Repair not found: " + repairId);
+    }
+  }
+
+  if (referenceType === "Purchase") {
+    purchaseId = referenceId;
+    if (!purchaseId) throw new Error("Enter the Purchase ID to link this expense.");
+    if (!findById_(FIXXIR.sheets.purchases, "Purchase_ID", purchaseId)) {
+      throw new Error("Purchase not found: " + purchaseId);
+    }
+  }
+
+  const supplierId = clean_(payload.Supplier_ID);
+  if (
+    supplierId &&
+    !findById_(FIXXIR.sheets.suppliers, "Supplier_ID", supplierId)
+  ) {
+    throw new Error("Vendor not found: " + supplierId);
+  }
+
+  const expenseId = generateId_(FIXXIR.sheets.generalExpenses);
+  const now = new Date();
+
+  const txnId = appendFinanceDebit_({
+    Date: expenseDate,
+    Category: clean_(payload.Category),
+    Amount: amount,
+    Payment_Method: clean_(payload.Payment_Method),
+    Account: clean_(payload.Account) || "Operating",
+    Repair_ID: repairId,
+    Purchase_ID: purchaseId,
+    General_Expense_ID: expenseId,
+    Supplier_ID: supplierId,
+    Reference_Type: referenceType || "General Expense",
+    Reference_ID: referenceId || expenseId,
+    Description: clean_(payload.Description),
+    Receipt_Reference: clean_(payload.Receipt_Reference),
+    Notes: clean_(payload.Notes),
+  });
+
+  appendRecord_(FIXXIR.sheets.generalExpenses, {
+    General_Expense_ID: expenseId,
+    Expense_Date: expenseDate,
+    Category: clean_(payload.Category),
+    Description: clean_(payload.Description),
+    Amount: amount,
+    Payment_Method: clean_(payload.Payment_Method),
+    Account: clean_(payload.Account) || "Operating",
+    Payee: clean_(payload.Payee),
+    Supplier_ID: supplierId,
+    Reference_Type: referenceType,
+    Reference_ID: referenceId,
+    Repair_ID: repairId,
+    Purchase_ID: purchaseId,
+    Finance_Transaction_ID: txnId,
+    Created_At: now,
+    Created_By: currentUser_(),
+    Notes: clean_(payload.Notes),
+  });
+
+  return findById_(
+    FIXXIR.sheets.generalExpenses,
+    "General_Expense_ID",
+    expenseId,
+  );
+}
+
+function createBulkSettlement(payload) {
+  assertAuthorized_();
+  ensureFinanceOperationsSchema_(getSpreadsheet_());
+
+  payload = payload || {};
+  requireFields_(payload, [
+    "Settlement_Date",
+    "Payee_Type",
+    "Payee_ID",
+    "Amount",
+    "Payment_Method",
+  ]);
+
+  const payeeType = clean_(payload.Payee_Type);
+  if (!["Technician", "Vendor"].includes(payeeType)) {
+    throw new Error("Payee type must be Technician or Vendor.");
+  }
+
+  const payeeId = clean_(payload.Payee_ID);
+  const payee = getSettlementPayee_(payeeType, payeeId);
+  if (!payee) {
+    throw new Error(payeeType + " not found: " + payeeId);
+  }
+
+  const settlementDate = parseDate_(payload.Settlement_Date);
+  if (!settlementDate) throw new Error("Settlement date is required.");
+
+  const amount = number_(payload.Amount);
+  if (!(amount > 0)) {
+    throw new Error("Settlement amount must be greater than zero.");
+  }
+
+  let allocations = payload.Allocations || [];
+  if (typeof allocations === "string") {
+    try {
+      allocations = JSON.parse(allocations || "[]");
+    } catch (error) {
+      throw new Error("Settlement allocations could not be read.");
+    }
+  }
+  if (!Array.isArray(allocations)) allocations = [];
+
+  const cleanAllocations = allocations
+    .map((allocation, index) => {
+      const referenceType = clean_(allocation.Reference_Type);
+      const referenceId = clean_(allocation.Reference_ID);
+      const allocationAmount = number_(allocation.Amount);
+
+      if (!referenceType && !referenceId && !(allocationAmount > 0)) {
+        return null;
+      }
+
+      if (!["Repair", "Purchase"].includes(referenceType)) {
+        throw new Error(
+          `Allocation ${index + 1}: choose Repair or Purchase.`,
+        );
+      }
+
+      if (!referenceId) {
+        throw new Error(
+          `Allocation ${index + 1}: enter the Repair/Purchase ID.`,
+        );
+      }
+
+      if (!(allocationAmount > 0)) {
+        throw new Error(
+          `Allocation ${index + 1}: amount must be greater than zero.`,
+        );
+      }
+
+      validateSettlementAllocation_(
+        payeeType,
+        payeeId,
+        referenceType,
+        referenceId,
+      );
+
+      return {
+        Reference_Type: referenceType,
+        Reference_ID: referenceId,
+        Amount: allocationAmount,
+        Notes: clean_(allocation.Notes),
+      };
+    })
+    .filter(Boolean);
+
+  const allocatedAmount = cleanAllocations.reduce(
+    (sum, allocation) => sum + allocation.Amount,
+    0,
+  );
+
+  if (allocatedAmount > amount + 0.0001) {
+    throw new Error(
+      "Allocated amount cannot exceed the total settlement amount.",
+    );
+  }
+
+  const settlementId = generateId_(FIXXIR.sheets.settlements);
+  const now = new Date();
+  const payeeName = getSettlementPayeeName_(payeeType, payee);
+
+  const txnId = appendFinanceDebit_({
+    Date: settlementDate,
+    Category:
+      payeeType === "Technician"
+        ? "Technician Settlement"
+        : "Vendor Settlement",
+    Amount: amount,
+    Payment_Method: clean_(payload.Payment_Method),
+    Account: clean_(payload.Account) || "Operating",
+    Settlement_ID: settlementId,
+    Supplier_ID: payeeType === "Vendor" ? payeeId : "",
+    Technician_ID: payeeType === "Technician" ? payeeId : "",
+    Reference_Type: "Settlement",
+    Reference_ID: settlementId,
+    Description:
+      clean_(payload.Description) ||
+      `${payeeType} settlement · ${payeeName}`,
+    Receipt_Reference: clean_(payload.Payment_Reference),
+    Notes: clean_(payload.Notes),
+  });
+
+  appendRecord_(FIXXIR.sheets.settlements, {
+    Settlement_ID: settlementId,
+    Settlement_Date: settlementDate,
+    Payee_Type: payeeType,
+    Payee_ID: payeeId,
+    Payee_Name: payeeName,
+    Amount: amount,
+    Allocated_Amount: allocatedAmount,
+    Unallocated_Amount: Math.max(0, amount - allocatedAmount),
+    Payment_Method: clean_(payload.Payment_Method),
+    Account: clean_(payload.Account) || "Operating",
+    Payment_Reference: clean_(payload.Payment_Reference),
+    Finance_Transaction_ID: txnId,
+    Created_At: now,
+    Created_By: currentUser_(),
+    Notes: clean_(payload.Notes),
+  });
+
+  cleanAllocations.forEach((allocation) => {
+    appendRecord_(FIXXIR.sheets.settlementAllocations, {
+      Settlement_Allocation_ID: generateId_(
+        FIXXIR.sheets.settlementAllocations,
+      ),
+      Settlement_ID: settlementId,
+      Settlement_Date: settlementDate,
+      Payee_Type: payeeType,
+      Payee_ID: payeeId,
+      Reference_Type: allocation.Reference_Type,
+      Reference_ID: allocation.Reference_ID,
+      Amount: allocation.Amount,
+      Created_At: now,
+      Created_By: currentUser_(),
+      Notes: allocation.Notes,
+    });
+  });
+
+  return getSettlement_(settlementId);
+}
+
+function getSettlement_(settlementId) {
+  const settlement = findById_(
+    FIXXIR.sheets.settlements,
+    "Settlement_ID",
+    settlementId,
+  );
+
+  if (!settlement) return null;
+
+  return {
+    settlement,
+    allocations: getRecords_(FIXXIR.sheets.settlementAllocations)
+      .filter((row) => row.Settlement_ID === settlementId),
+  };
+}
+
+function listGeneralExpenses_(filters) {
+  filters = filters || {};
+  const q = clean_(filters.expenseQ || filters.q).toLowerCase();
+
+  let rows = getRecords_(FIXXIR.sheets.generalExpenses);
+
+  if (q) {
+    rows = rows.filter((row) =>
+      [
+        row.General_Expense_ID,
+        row.Category,
+        row.Description,
+        row.Payee,
+        row.Reference_ID,
+        row.Supplier_ID,
+      ].some((value) =>
+        String(value || "").toLowerCase().includes(q),
+      ),
+    );
+  }
+
+  rows.sort((a, b) => {
+    const dateCmp = String(b.Expense_Date || "").localeCompare(
+      String(a.Expense_Date || ""),
+    );
+    if (dateCmp) return dateCmp;
+    return String(b.Created_At || "").localeCompare(
+      String(a.Created_At || ""),
+    );
+  });
+
+  return rows.slice(0, 250);
+}
+
+function listSettlements_(filters) {
+  filters = filters || {};
+  const q = clean_(filters.settlementQ || filters.q).toLowerCase();
+
+  const allocations = getRecords_(FIXXIR.sheets.settlementAllocations);
+  const allocationMap = {};
+
+  allocations.forEach((allocation) => {
+    const id = allocation.Settlement_ID;
+    if (!id) return;
+    if (!allocationMap[id]) allocationMap[id] = [];
+    allocationMap[id].push(allocation);
+  });
+
+  let rows = getRecords_(FIXXIR.sheets.settlements).map((settlement) =>
+    Object.assign({}, settlement, {
+      Allocations: allocationMap[settlement.Settlement_ID] || [],
+      Allocation_Count:
+        (allocationMap[settlement.Settlement_ID] || []).length,
+    }),
+  );
+
+  if (q) {
+    rows = rows.filter((row) =>
+      [
+        row.Settlement_ID,
+        row.Payee_Type,
+        row.Payee_ID,
+        row.Payee_Name,
+        row.Payment_Reference,
+        row.Notes,
+        ...(row.Allocations || []).map(
+          (allocation) =>
+            `${allocation.Reference_Type} ${allocation.Reference_ID}`,
+        ),
+      ].some((value) =>
+        String(value || "").toLowerCase().includes(q),
+      ),
+    );
+  }
+
+  rows.sort((a, b) => {
+    const dateCmp = String(b.Settlement_Date || "").localeCompare(
+      String(a.Settlement_Date || ""),
+    );
+    if (dateCmp) return dateCmp;
+    return String(b.Created_At || "").localeCompare(
+      String(a.Created_At || ""),
+    );
+  });
+
+  return rows.slice(0, 250);
+}
+
+function getFinanceOperationsSummary_() {
+  const expenses = getRecords_(FIXXIR.sheets.generalExpenses);
+  const settlements = getRecords_(FIXXIR.sheets.settlements);
+
+  return {
+    generalExpenseTotal: expenses.reduce(
+      (sum, row) => sum + number_(row.Amount),
+      0,
+    ),
+    settlementTotal: settlements.reduce(
+      (sum, row) => sum + number_(row.Amount),
+      0,
+    ),
+    unallocatedSettlements: settlements.reduce(
+      (sum, row) => sum + number_(row.Unallocated_Amount),
+      0,
+    ),
+    settlementCount: settlements.length,
+  };
+}
+
+function validateSettlementAllocation_(
+  payeeType,
+  payeeId,
+  referenceType,
+  referenceId
+) {
+  if (referenceType === "Repair") {
+    const repair = findById_(
+      FIXXIR.sheets.repairs,
+      "Repair_ID",
+      referenceId,
+    );
+    if (!repair) throw new Error("Repair not found: " + referenceId);
+
+    if (
+      payeeType === "Technician" &&
+      repair.Technician_ID &&
+      repair.Technician_ID !== payeeId
+    ) {
+      throw new Error(
+        `${referenceId} is assigned to another technician.`,
+      );
+    }
+
+    return true;
+  }
+
+  if (referenceType === "Purchase") {
+    const purchase = findById_(
+      FIXXIR.sheets.purchases,
+      "Purchase_ID",
+      referenceId,
+    );
+    if (!purchase) throw new Error("Purchase not found: " + referenceId);
+
+    if (
+      payeeType === "Vendor" &&
+      purchase.Supplier_ID &&
+      purchase.Supplier_ID !== payeeId
+    ) {
+      throw new Error(
+        `${referenceId} belongs to a different vendor.`,
+      );
+    }
+
+    return true;
+  }
+
+  throw new Error("Settlement allocation must reference a Repair or Purchase.");
+}
+
+function getSettlementPayee_(payeeType, payeeId) {
+  if (payeeType === "Technician") {
+    return findById_(
+      FIXXIR.sheets.technicians,
+      "Technician_ID",
+      payeeId,
+    );
+  }
+
+  if (payeeType === "Vendor") {
+    return findById_(
+      FIXXIR.sheets.suppliers,
+      "Supplier_ID",
+      payeeId,
+    );
+  }
+
+  return null;
+}
+
+function getSettlementPayeeName_(payeeType, payee) {
+  payee = payee || {};
+
+  if (payeeType === "Technician") {
+    return clean_(
+      payee.Full_Name ||
+      payee.Name ||
+      payee.Technician_ID
+    );
+  }
+
+  return clean_(
+    payee.Supplier_Name ||
+    payee.Company_Name ||
+    payee.Name ||
+    payee.Full_Name ||
+    payee.Contact_Name ||
+    payee.Supplier_ID
+  );
+}
+
+function appendFinanceDebit_(payload) {
+  ensureFinanceOperationsSchema_(getSpreadsheet_());
+
+  const txnId = generateId_(FIXXIR.sheets.finance);
+
+  appendRecord_(FIXXIR.sheets.finance, {
+    Transaction_ID: txnId,
+    Date: parseDate_(payload.Date) || new Date(),
+    Transaction_Type: "Debit",
+    Category: clean_(payload.Category),
+    Amount: number_(payload.Amount),
+    Payment_Method: clean_(payload.Payment_Method),
+    Account: clean_(payload.Account) || "Operating",
+    Repair_ID: clean_(payload.Repair_ID),
+    Sales_ID: clean_(payload.Sales_ID),
+    Purchase_ID: clean_(payload.Purchase_ID),
+    Settlement_ID: clean_(payload.Settlement_ID),
+    General_Expense_ID: clean_(payload.General_Expense_ID),
+    Reference_Type: clean_(payload.Reference_Type) || "General",
+    Reference_ID: clean_(payload.Reference_ID),
+    Customer_ID: clean_(payload.Customer_ID),
+    Supplier_ID: clean_(payload.Supplier_ID),
+    Technician_ID: clean_(payload.Technician_ID),
+    Description: clean_(payload.Description),
+    Receipt_Reference: clean_(payload.Receipt_Reference),
+    Entered_By: currentUser_(),
+    Approval_Status: clean_(payload.Approval_Status) || "Approved",
+    Notes: clean_(payload.Notes),
+  });
+
+  return txnId;
+}
+
+function getSettlementAllocationsFor_(
+  referenceType,
+  referenceId
+) {
+  ensureFinanceOperationsSchema_(getSpreadsheet_());
+
+  return getRecords_(FIXXIR.sheets.settlementAllocations)
+    .filter(
+      (row) =>
+        row.Reference_Type === referenceType &&
+        row.Reference_ID === referenceId,
+    )
+    .sort((a, b) =>
+      String(b.Settlement_Date || "").localeCompare(
+        String(a.Settlement_Date || ""),
+      ),
+    );
+}
+
+function addSettlementRepairCostsToFinanceMap_(map) {
+  ensureFinanceOperationsSchema_(getSpreadsheet_());
+
+  getRecords_(FIXXIR.sheets.settlementAllocations)
+    .filter((row) => row.Reference_Type === "Repair")
+    .forEach((row) => {
+      const id = row.Reference_ID;
+      if (!id) return;
+      if (!map[id]) map[id] = { credits: 0, debits: 0 };
+      map[id].debits += number_(row.Amount);
+    });
+
+  return map;
+}
+
+function ensureFinanceOperationsSchema_(ss) {
+  ss = ss || getSpreadsheet_();
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.generalExpenses,
+    FIXXIR_GENERAL_EXPENSE_HEADERS,
+  );
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.settlements,
+    FIXXIR_SETTLEMENT_HEADERS,
+  );
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.settlementAllocations,
+    FIXXIR_SETTLEMENT_ALLOCATION_HEADERS,
+  );
+
+  // Existing Finance_Ledger rows remain untouched. These columns are appended
+  // only if missing so new transactions can link to the new modules.
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.finance,
+    [
+      "Purchase_ID",
+      "Settlement_ID",
+      "General_Expense_ID",
+      "Supplier_ID",
+      "Technician_ID",
+    ],
+  );
 }
 
 /* ---------------- Data helpers ---------------- */

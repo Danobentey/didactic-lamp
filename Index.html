@@ -1357,6 +1357,124 @@
   </div>
 </div>
 
+<div class="modal" id="generalExpenseModal">
+  <div class="modal-box" style="width:min(760px,100%)">
+    <div class="modal-head">
+      <h3>General Expense</h3>
+      <button class="close" onclick="closeModal('generalExpenseModal')">×</button>
+    </div>
+
+    <form id="generalExpenseForm" onsubmit="submitGeneralExpense(event)">
+      <div class="modal-body">
+        <div class="form-grid">
+          <div><label class="required">Expense date</label><input class="input" type="date" name="Expense_Date" id="generalExpenseDate" required></div>
+          <div><label class="required">Category</label>
+            <select class="select" name="Category" required>
+              <option value="">Select category</option>
+              <option>Utilities</option>
+              <option>Tools & Equipment</option>
+              <option>Rent</option>
+              <option>Power / Fuel</option>
+              <option>Internet / Data</option>
+              <option>Transport / Logistics</option>
+              <option>Office Supplies</option>
+              <option>Marketing</option>
+              <option>Bank Charges</option>
+              <option>Maintenance</option>
+              <option>Staff / Admin</option>
+              <option>Other</option>
+            </select>
+          </div>
+
+          <div class="full"><label class="required">Description</label><input class="input" name="Description" required placeholder="e.g. Workshop electricity, soldering station, office data"></div>
+          <div><label class="required">Amount (₦)</label><input class="input" type="number" min="1" step="1" name="Amount" required></div>
+          <div><label class="required">Payment method</label><select class="select" name="Payment_Method" id="generalExpensePaymentMethod" required></select></div>
+          <div><label>Account</label><input class="input" name="Account" value="Operating"></div>
+          <div><label>Payee</label><input class="input" name="Payee"></div>
+          <div><label>Vendor (optional)</label><select class="select" name="Supplier_ID" id="generalExpenseSupplier"></select></div>
+
+          <div><label>Link to</label>
+            <select class="select" name="Reference_Type" id="generalExpenseReferenceType" onchange="updateGeneralExpenseReferencePlaceholder()">
+              <option value="">Not linked</option>
+              <option>Repair</option>
+              <option>Purchase</option>
+            </select>
+          </div>
+          <div><label>Repair / Purchase ID</label><input class="input" name="Reference_ID" id="generalExpenseReferenceId" placeholder="Optional"></div>
+
+          <div><label>Receipt / bank reference</label><input class="input" name="Receipt_Reference"></div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+
+        <div class="muted" style="font-size:12px;margin-top:12px">
+          If a cost belongs to acquiring stock, enter it under that Purchase's shared costs instead so landed cost remains correct.
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn" onclick="closeModal('generalExpenseModal')">Cancel</button>
+        <button class="btn primary" type="submit">Record expense</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="bulkSettlementModal">
+  <div class="modal-box" style="width:min(1000px,100%)">
+    <div class="modal-head">
+      <h3>Bulk Settlement</h3>
+      <button class="close" onclick="closeModal('bulkSettlementModal')">×</button>
+    </div>
+
+    <form id="bulkSettlementForm" onsubmit="submitBulkSettlement(event)">
+      <div class="modal-body">
+        <div class="form-grid">
+          <div><label class="required">Settlement date</label><input class="input" type="date" name="Settlement_Date" id="settlementDate" required></div>
+          <div><label class="required">Payee type</label>
+            <select class="select" name="Payee_Type" id="settlementPayeeType" onchange="fillSettlementPayees()" required>
+              <option value="">Select</option>
+              <option>Technician</option>
+              <option>Vendor</option>
+            </select>
+          </div>
+
+          <div><label class="required">Payee</label><select class="select" name="Payee_ID" id="settlementPayeeId" required></select></div>
+          <div><label class="required">Total paid (₦)</label><input class="input" type="number" min="1" step="1" name="Amount" id="settlementAmount" oninput="recalcSettlementAllocation()" required></div>
+          <div><label class="required">Payment method</label><select class="select" name="Payment_Method" id="settlementPaymentMethod" required></select></div>
+          <div><label>Account</label><input class="input" name="Account" value="Operating"></div>
+          <div><label>Payment reference</label><input class="input" name="Payment_Reference"></div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+
+        <div class="section-head" style="margin-top:24px">
+          <div>
+            <h3>Allocate settlement</h3>
+            <div class="muted" style="font-size:12px;margin-top:4px">
+              Link portions of this payment to repairs and/or purchases. You can leave part of the payment unallocated.
+            </div>
+          </div>
+          <button type="button" class="btn small" onclick="addSettlementAllocationRow()">+ Add link</button>
+        </div>
+
+        <div id="settlementAllocations">
+          <div class="empty" style="padding:14px">No links added yet.</div>
+        </div>
+
+        <div class="finance-box" style="margin-top:16px">
+          <div class="finance-row"><span>Total paid</span><b id="settlementTotalView">₦0</b></div>
+          <div class="finance-row"><span>Allocated</span><b id="settlementAllocatedView">₦0</b></div>
+          <div class="finance-row big"><span>Unallocated</span><span id="settlementUnallocatedView">₦0</span></div>
+        </div>
+      </div>
+
+      <div class="modal-foot">
+        <button type="button" class="btn" onclick="closeModal('bulkSettlementModal')">Cancel</button>
+        <button class="btn primary" type="submit">Record settlement</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="modal" id="financeModal">
       <div class="modal-box" style="width: min(650px, 100%)">
         <div class="modal-head">
@@ -1440,6 +1558,9 @@
     <div class="toast" id="toast"></div>
 
     <script>
+  let SETTLEMENT_ALLOCATION_SEQ = 0;
+  let FINANCE_OPS_TIMER = null;
+
       let BOOT = null;
       let CURRENT_PAGE = "dashboard";
       let CUSTOMER_TIMER = null;
@@ -3121,6 +3242,14 @@
         </div>
       </div>
 
+      <div style="margin-top:24px" class="section-head"><h3>Vendor settlement</h3></div>
+      <div class="detail-list" style="margin-bottom:14px">
+        ${detail('Purchase items due',data.settlementSummary?money(data.settlementSummary.supplierDue):'—')}
+        ${detail('Settled to vendor',data.settlementSummary?money(data.settlementSummary.supplierSettled):'—')}
+        ${detail('Vendor balance',data.settlementSummary?money(data.settlementSummary.supplierBalance):'—')}
+      </div>
+      ${settlementAllocationTable(data.settlementAllocations||[])}
+
       <div style="margin-top:24px" class="section-head"><h3>Purchased items</h3></div>
       ${purchaseItemsTable(items)}
 
@@ -3253,16 +3382,364 @@
   }
 
   function renderFinancePage() {
-        document.getElementById("content").innerHTML = `
-      <div class="toolbar"><div><h2>Finance</h2><div class="muted" style="margin-top:5px">MVP finance posting is currently repair-linked. Full ledger view comes with Sales/Inventory phase.</div></div></div>
-      <div class="grid kpis">
-        ${kpi("Today's credits", money(BOOT.dashboard.todayCredits), "Cash/revenue posted today")}
-        ${kpi("Today's debits", money(BOOT.dashboard.todayDebits), "Expenses posted today")}
-        ${kpi("Net today", money(BOOT.dashboard.netToday), "Credits minus debits")}
-        ${kpi("Repair receivables", money(BOOT.dashboard.outstandingRepairBalances), "Outstanding repair balances")}
+    document.getElementById('content').innerHTML=`
+      <div class="toolbar">
+        <div>
+          <h2>Finance</h2>
+          <div class="muted" style="margin-top:5px">Cash movement, general operating expenses, technician settlements and vendor settlements.</div>
+        </div>
+        <div class="actions">
+          <button class="btn" onclick="openBulkSettlement()">+ Bulk Settlement</button>
+          <button class="btn primary" onclick="openGeneralExpense()">+ General Expense</button>
+        </div>
       </div>
-      <div class="card section"><div class="empty">Open a Repair to post a payment or direct repair expense. The full Finance Ledger screen is the next finance iteration.</div></div>`;
+
+      <div class="grid kpis" id="financeOpsKpis">
+        ${kpi("Today's credits",money(BOOT.dashboard.todayCredits),'Cash/revenue posted today')}
+        ${kpi("Today's debits",money(BOOT.dashboard.todayDebits),'Cash paid today')}
+        ${kpi('General expenses','—','Recorded operating/general expenses')}
+        ${kpi('Settlements','—','Technician and vendor bulk payments')}
+      </div>
+
+      <div class="card section" style="margin-bottom:18px">
+        <div class="section-head"><h3>General expenses</h3><button class="btn small" onclick="openGeneralExpense()">+ Expense</button></div>
+        <div class="filters" style="margin-bottom:14px">
+          <input class="input" id="generalExpenseQ" placeholder="Search category, payee, description or linked ID…" oninput="debouncedFinanceOpsLoad()">
+        </div>
+        <div id="generalExpensesList"><div class="empty">Loading expenses…</div></div>
+      </div>
+
+      <div class="card section">
+        <div class="section-head"><h3>Bulk settlements</h3><button class="btn small" onclick="openBulkSettlement()">+ Settlement</button></div>
+        <div class="filters" style="margin-bottom:14px">
+          <input class="input" id="settlementQ" placeholder="Search payee, settlement or linked repair/purchase…" oninput="debouncedFinanceOpsLoad()">
+        </div>
+        <div id="settlementsList"><div class="empty">Loading settlements…</div></div>
+      </div>`;
+
+    populateFinanceOpsSelects();
+    loadFinanceOperations();
+  }
+
+  /* FIXXIR_FINANCE_OPS_UI_V1 */
+
+  function financeOpsToday(){
+    const now=new Date();
+    const local=new Date(now.getTime()-now.getTimezoneOffset()*60000);
+    return local.toISOString().slice(0,10);
+  }
+
+  function populateFinanceOpsSelects(){
+    fillSelect(
+      'generalExpensePaymentMethod',
+      BOOT.settings.Payment_Method||[],
+      'Select method'
+    );
+
+    fillSelect(
+      'settlementPaymentMethod',
+      BOOT.settings.Payment_Method||[],
+      'Select method'
+    );
+
+    fillSelect(
+      'generalExpenseSupplier',
+      (BOOT.suppliers||[]).map(s=>({
+        value:s.Supplier_ID,
+        label:s.Supplier_Name||s.Company_Name||s.Name||s.Supplier_ID
+      })),
+      'No vendor'
+    );
+
+    fillSettlementPayees();
+  }
+
+  function openGeneralExpense(){
+    const form=document.getElementById('generalExpenseForm');
+    form.reset();
+
+    populateFinanceOpsSelects();
+    document.getElementById('generalExpenseDate').value=financeOpsToday();
+    updateGeneralExpenseReferencePlaceholder();
+    document.getElementById('generalExpenseModal').classList.add('open');
+  }
+
+  function updateGeneralExpenseReferencePlaceholder(){
+    const type=document.getElementById('generalExpenseReferenceType')?.value||'';
+    const input=document.getElementById('generalExpenseReferenceId');
+    if(!input)return;
+
+    if(type==='Repair')input.placeholder='REP-000123';
+    else if(type==='Purchase')input.placeholder='PUR-000123';
+    else input.placeholder='Optional';
+
+    if(!type)input.value='';
+  }
+
+  async function submitGeneralExpense(e){
+    e.preventDefault();
+    const data=formObject(e.target);
+
+    showLoading(true);
+    try{
+      const row=await server('createGeneralExpense',data);
+      closeModal('generalExpenseModal');
+      toast(`Recorded ${row.General_Expense_ID}`);
+
+      BOOT.dashboard=await server('refreshDashboard');
+      if(CURRENT_PAGE==='finance')await loadFinanceOperations();
+    }catch(err){
+      toast(err.message,true);
+    }finally{
+      showLoading(false);
+    }
+  }
+
+  function openBulkSettlement(){
+    const form=document.getElementById('bulkSettlementForm');
+    form.reset();
+
+    SETTLEMENT_ALLOCATION_SEQ=0;
+    document.getElementById('settlementAllocations').innerHTML=
+      '<div class="empty" style="padding:14px">No links added yet.</div>';
+
+    populateFinanceOpsSelects();
+    document.getElementById('settlementDate').value=financeOpsToday();
+    fillSettlementPayees();
+    recalcSettlementAllocation();
+
+    document.getElementById('bulkSettlementModal').classList.add('open');
+  }
+
+  function fillSettlementPayees(){
+    const type=document.getElementById('settlementPayeeType')?.value||'';
+    const select=document.getElementById('settlementPayeeId');
+    if(!select)return;
+
+    if(type==='Technician'){
+      fillSelect(
+        'settlementPayeeId',
+        (BOOT.technicians||[]).map(t=>({
+          value:t.Technician_ID,
+          label:t.Full_Name||t.Technician_ID
+        })),
+        'Select technician'
+      );
+      return;
+    }
+
+    if(type==='Vendor'){
+      fillSelect(
+        'settlementPayeeId',
+        (BOOT.suppliers||[]).map(s=>({
+          value:s.Supplier_ID,
+          label:s.Supplier_Name||s.Company_Name||s.Name||s.Supplier_ID
+        })),
+        'Select vendor'
+      );
+      return;
+    }
+
+    fillSelect('settlementPayeeId',[],'Choose payee type first');
+  }
+
+  function addSettlementAllocationRow(allocation={}){
+    const box=document.getElementById('settlementAllocations');
+    if(box.querySelector('.empty'))box.innerHTML='';
+
+    SETTLEMENT_ALLOCATION_SEQ+=1;
+
+    const row=document.createElement('div');
+    row.className='card section settlement-allocation-row';
+    row.style.marginBottom='10px';
+
+    row.innerHTML=`
+      <div class="section-head">
+        <h3>Link ${SETTLEMENT_ALLOCATION_SEQ}</h3>
+        <button type="button" class="btn small" onclick="removeSettlementAllocationRow(this)">Remove</button>
+      </div>
+      <div class="form-grid">
+        <div><label class="required">Reference type</label>
+          <select class="select" data-field="Reference_Type">
+            <option>Repair</option>
+            <option>Purchase</option>
+          </select>
+        </div>
+        <div><label class="required">Repair / Purchase ID</label><input class="input" data-field="Reference_ID" value="${escAttr(allocation.Reference_ID||'')}" placeholder="REP-000123 or PUR-000123"></div>
+        <div><label class="required">Amount (₦)</label><input class="input" type="number" min="1" step="1" data-field="Amount" value="${escAttr(allocation.Amount||'')}" oninput="recalcSettlementAllocation()"></div>
+        <div><label>Notes</label><input class="input" data-field="Notes" value="${escAttr(allocation.Notes||'')}"></div>
+      </div>`;
+
+    box.appendChild(row);
+
+    const type=row.querySelector('[data-field="Reference_Type"]');
+    if(allocation.Reference_Type)type.value=allocation.Reference_Type;
+
+    recalcSettlementAllocation();
+  }
+
+  function removeSettlementAllocationRow(button){
+    button.closest('.settlement-allocation-row').remove();
+
+    const box=document.getElementById('settlementAllocations');
+    if(!box.querySelector('.settlement-allocation-row')){
+      box.innerHTML=
+        '<div class="empty" style="padding:14px">No links added yet.</div>';
+    }
+
+    recalcSettlementAllocation();
+  }
+
+  function settlementAllocationsPayload(){
+    return [...document.querySelectorAll('.settlement-allocation-row')].map(row=>{
+      const get=field=>row.querySelector(`[data-field="${field}"]`)?.value||'';
+      return {
+        Reference_Type:get('Reference_Type'),
+        Reference_ID:get('Reference_ID'),
+        Amount:get('Amount'),
+        Notes:get('Notes')
+      };
+    });
+  }
+
+  function recalcSettlementAllocation(){
+    const total=num(document.getElementById('settlementAmount')?.value);
+    const allocated=[...document.querySelectorAll('.settlement-allocation-row')]
+      .reduce((sum,row)=>sum+num(row.querySelector('[data-field="Amount"]')?.value),0);
+
+    document.getElementById('settlementTotalView').textContent=money(total);
+    document.getElementById('settlementAllocatedView').textContent=money(allocated);
+    document.getElementById('settlementUnallocatedView').textContent=
+      allocated>total
+        ? `Over by ${money(allocated-total)}`
+        : money(total-allocated);
+  }
+
+  async function submitBulkSettlement(e){
+    e.preventDefault();
+    const data=formObject(e.target);
+    data.Allocations=settlementAllocationsPayload();
+
+    showLoading(true);
+    try{
+      const result=await server('createBulkSettlement',data);
+      closeModal('bulkSettlementModal');
+      toast(`Recorded ${result.settlement.Settlement_ID}`);
+
+      BOOT.dashboard=await server('refreshDashboard');
+
+      if(CURRENT_PAGE==='finance'){
+        await loadFinanceOperations();
       }
+
+      if(CURRENT_PAGE==='repairs'){
+        await loadRepairs();
+      }
+
+      if(CURRENT_PAGE==='purchases'){
+        await loadPurchases();
+      }
+    }catch(err){
+      toast(err.message,true);
+    }finally{
+      showLoading(false);
+    }
+  }
+
+  function debouncedFinanceOpsLoad(){
+    clearTimeout(FINANCE_OPS_TIMER);
+    FINANCE_OPS_TIMER=setTimeout(loadFinanceOperations,300);
+  }
+
+  async function loadFinanceOperations(){
+    try{
+      const data=await server('getFinanceOperationsData',{
+        expenseQ:document.getElementById('generalExpenseQ')?.value||'',
+        settlementQ:document.getElementById('settlementQ')?.value||''
+      });
+
+      const s=data.summary||{};
+      const kpis=document.getElementById('financeOpsKpis');
+
+      if(kpis){
+        kpis.innerHTML=`
+          ${kpi("Today's credits",money(BOOT.dashboard.todayCredits),'Cash/revenue posted today')}
+          ${kpi("Today's debits",money(BOOT.dashboard.todayDebits),'Cash paid today')}
+          ${kpi('General expenses',money(s.generalExpenseTotal),'Recorded operating/general expenses')}
+          ${kpi('Settlements',money(s.settlementTotal),`${s.settlementCount||0} bulk payment(s)`)}`;
+      }
+
+      renderGeneralExpenses(data.generalExpenses||[]);
+      renderSettlements(data.settlements||[]);
+    }catch(e){
+      toast(e.message,true);
+    }
+  }
+
+  function renderGeneralExpenses(rows){
+    const box=document.getElementById('generalExpensesList');
+    if(!box)return;
+
+    if(!rows.length){
+      box.innerHTML='<div class="empty">No general expenses recorded.</div>';
+      return;
+    }
+
+    box.innerHTML=`<div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Expense</th><th>Payee</th><th>Link</th><th>Amount</th><th>Method</th></tr></thead>
+      <tbody>${rows.map(row=>`<tr>
+        <td>${dateOnly(row.Expense_Date)||'—'}</td>
+        <td><b>${esc(row.Category)}</b><br><span class="muted">${esc(row.Description||'')}</span></td>
+        <td>${esc(row.Payee||row.Supplier_ID||'—')}</td>
+        <td>${row.Reference_ID?`${esc(row.Reference_Type)} · <b>${esc(row.Reference_ID)}</b>`:'—'}</td>
+        <td class="money">${money(row.Amount)}</td>
+        <td>${esc(row.Payment_Method||'')}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  function renderSettlements(rows){
+    const box=document.getElementById('settlementsList');
+    if(!box)return;
+
+    if(!rows.length){
+      box.innerHTML='<div class="empty">No settlements recorded.</div>';
+      return;
+    }
+
+    box.innerHTML=`<div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Settlement</th><th>Payee</th><th>Linked records</th><th>Total</th><th>Allocated</th><th>Unallocated</th></tr></thead>
+      <tbody>${rows.map(row=>`<tr>
+        <td>${dateOnly(row.Settlement_Date)||'—'}</td>
+        <td><b>${esc(row.Settlement_ID)}</b><br><span class="muted">${esc(row.Payment_Reference||row.Payment_Method||'')}</span></td>
+        <td><span class="status">${esc(row.Payee_Type)}</span><br>${esc(row.Payee_Name||row.Payee_ID||'')}</td>
+        <td>${(row.Allocations||[]).length
+          ?(row.Allocations||[]).map(a=>`${esc(a.Reference_Type)} <b>${esc(a.Reference_ID)}</b> · ${money(a.Amount)}`).join('<br>')
+          :'—'}</td>
+        <td class="money">${money(row.Amount)}</td>
+        <td class="money">${money(row.Allocated_Amount)}</td>
+        <td class="money">${money(row.Unallocated_Amount)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
+
+  function settlementAllocationTable(rows){
+    if(!rows||!rows.length){
+      return '<div class="empty" style="padding:16px">No bulk settlements linked to this record.</div>';
+    }
+
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Settlement</th><th>Payee type</th><th>Payee</th><th>Amount</th><th>Notes</th></tr></thead>
+      <tbody>${rows.map(row=>`<tr>
+        <td>${dateOnly(row.Settlement_Date)||'—'}</td>
+        <td>${esc(row.Settlement_ID)}</td>
+        <td>${esc(row.Payee_Type)}</td>
+        <td>${esc(row.Payee_ID)}</td>
+        <td class="money">${money(row.Amount)}</td>
+        <td>${esc(row.Notes||'')}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  }
 
       function openNewRepair() {
         document.getElementById("repairForm").reset();
@@ -3409,6 +3886,9 @@
         <button class="btn small" onclick="openEntityNote('Repair',CURRENT_REPAIR?.repair?.Repair_ID)">+ Add Note</button>
       </div>
       ${entityNotesView(data.notes||[],r.Notes||'')}
+      <div style="margin-top:24px" class="section-head"><h3>Bulk settlements linked to repair</h3></div>
+      ${settlementAllocationTable(data.settlementAllocations||[])}
+
       <div style="margin-top:24px" class="section-head"><h3>Transactions</h3></div>
       ${transactionTable(data.transactions || [])}`;
       }
