@@ -367,6 +367,8 @@ function initializeFixxir(spreadsheetId) {
 
   ensureFinanceOperationsSchema_(ss);
 
+  ensureAuditIdentitySchema_(ss);
+
   const requiredSheets = Object.values(FIXXIR.sheets);
   const missing = requiredSheets.filter((name) => !ss.getSheetByName(name));
 
@@ -880,6 +882,7 @@ function createRepair(payload) {
     Collection_Method: clean_(payload.Collection_Method),
     Created_By: currentUser_(),
     Last_Updated: now,
+    Last_Updated_By: currentUser_(),
     Notes: clean_(payload.Notes),
   });
 
@@ -922,6 +925,7 @@ function updateRepair(payload) {
     }
   });
   updates.Last_Updated = new Date();
+  updates.Last_Updated_By = currentUser_();
 
   updateRecordById_(FIXXIR.sheets.repairs, "Repair_ID", repairId, updates);
   return getRepair(repairId);
@@ -1292,6 +1296,7 @@ function createSale(payload) {
     Payment_Method: clean_(payload.Payment_Method),
     Created_By: currentUser_(),
     Last_Updated: now,
+    Last_Updated_By: currentUser_(),
     Notes: clean_(payload.Notes),
   });
 
@@ -1371,6 +1376,7 @@ function syncSalePaymentFields_(salesId) {
     Balance: sale.summary.balance,
     Payment_Status: sale.summary.paymentStatus,
     Last_Updated: new Date(),
+    Last_Updated_By: currentUser_(),
   });
 }
 
@@ -1585,6 +1591,7 @@ function getOrCreateCatalogProduct_(payload) {
     Status: "Active",
     Date_Created: now,
     Last_Updated: now,
+    Last_Updated_By: currentUser_(),
     Notes: clean_(payload.Notes),
   });
 
@@ -1802,6 +1809,7 @@ function saveQuote(payload) {
     Valid_Until: parseDate_(payload.Valid_Until),
     Created_By: currentUser_(),
     Last_Updated: now,
+    Last_Updated_By: currentUser_(),
     Notes: clean_(payload.Notes),
   };
 
@@ -1879,6 +1887,7 @@ function convertQuoteToSale(quoteId) {
     Quote_Status: "Converted",
     Converted_Sales_ID: sale.order.Sales_ID,
     Last_Updated: new Date(),
+    Last_Updated_By: currentUser_(),
   });
 
   return sale;
@@ -2070,6 +2079,7 @@ function saveSupplierCatalogItem(payload) {
     Availability: clean_(payload.Availability) || "Unknown",
     Status: clean_(payload.Status) || "Active",
     Last_Updated: now,
+    Last_Updated_By: currentUser_(),
     Notes: clean_(payload.Notes),
   };
 
@@ -2449,6 +2459,7 @@ function createPurchase(payload) {
     Created_At: now,
     Created_By: currentUser_(),
     Last_Updated: now,
+    Last_Updated_By: currentUser_(),
     Notes: clean_(payload.Notes),
   });
 
@@ -2673,6 +2684,7 @@ function recalculatePurchaseCosts_(purchaseId) {
       Landed_Total: fullyKnown ? subtotal + additionalCosts : "",
       Cost_Status: fullyKnown ? "Known" : "Pending",
       Last_Updated: new Date(),
+      Last_Updated_By: currentUser_(),
     },
   );
 }
@@ -2719,6 +2731,7 @@ function upsertSupplierCatalogFromPurchase_(payload) {
     Status: "Active",
     Created_At: now,
     Last_Updated: now,
+    Last_Updated_By: currentUser_(),
   });
 
   return id;
@@ -2739,6 +2752,7 @@ function updateSupplierCatalogPurchasePrice_(
       Last_Purchase_Price: number_(unitCost),
       Last_Purchase_Date: parseDate_(purchaseDate),
       Last_Updated: new Date(),
+      Last_Updated_By: currentUser_(),
     },
   );
 }
@@ -3843,6 +3857,23 @@ function ensureFinanceOperationsSchema_(ss) {
   );
 }
 
+/* ---------------- Audit identity schema ---------------- */
+
+function ensureAuditIdentitySchema_(ss) {
+  ss = ss || getSpreadsheet_();
+
+  [
+    [FIXXIR.sheets.repairs, ["Created_By", "Last_Updated", "Last_Updated_By"]],
+    [FIXXIR.sheets.purchases, ["Created_By", "Last_Updated", "Last_Updated_By"]],
+    [FIXXIR.sheets.salesOrders, ["Created_By", "Last_Updated", "Last_Updated_By"]],
+    [FIXXIR.sheets.quotes, ["Created_By", "Last_Updated", "Last_Updated_By"]],
+    [FIXXIR.sheets.catalog, ["Last_Updated", "Last_Updated_By"]],
+    [FIXXIR.sheets.supplierCatalog, ["Last_Updated", "Last_Updated_By"]]
+  ].forEach(([sheetName, headers]) => {
+    if (sheetName) ensureSheetColumns_(ss, sheetName, headers);
+  });
+}
+
 /* ---------------- Data helpers ---------------- */
 
 function getSpreadsheet_() {
@@ -4032,12 +4063,31 @@ function assertAuthorized_() {
   return true;
 }
 
+/* FIXXIR_PER_USER_AUDIT_V1 */
+
 function currentUser_() {
-  return (
-    Session.getActiveUser().getEmail() ||
-    Session.getEffectiveUser().getEmail() ||
-    "Unknown user"
-  );
+  const email = String(Session.getActiveUser().getEmail() || "")
+    .trim()
+    .toLowerCase();
+
+  if (!email) {
+    throw new Error(
+      "Fixxir could not identify the signed-in user. " +
+      "Sign in with an authorized Google account and reopen the app."
+    );
+  }
+
+  return email;
+}
+
+function getCurrentUserIdentity() {
+  assertAuthorized_();
+  return {
+    email: currentUser_(),
+    effectiveUser: String(Session.getEffectiveUser().getEmail() || "")
+      .trim()
+      .toLowerCase()
+  };
 }
 
 function requireFields_(obj, fields) {
