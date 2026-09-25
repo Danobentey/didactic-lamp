@@ -9,6 +9,7 @@
 const FIXXIR = Object.freeze({
   sheets: {
     customers: "Customers",
+    staffUsers: "Staff_Users",
     repairs: "Repairs",
     repairExpenses: "Repair_Expenses",
     technicians: "Technicians",
@@ -35,6 +36,7 @@ const FIXXIR = Object.freeze({
   },
   prefixes: {
     Customers: "CUS",
+    Staff_Users: "STF",
     Repairs: "REP",
     Repair_Expenses: "REX",
     Technicians: "TEC",
@@ -316,6 +318,24 @@ const FIXXIR_SETTLEMENT_ALLOCATION_HEADERS = Object.freeze([
   "Notes",
 ]);
 
+
+/* FIXXIR_STAFF_AUTH_V1 */
+
+const FIXXIR_STAFF_USER_HEADERS = Object.freeze([
+  "Staff_ID",
+  "Full_Name",
+  "Email",
+  "PIN_Salt",
+  "PIN_Hash",
+  "Role",
+  "Status",
+  "Created_At",
+  "Created_By",
+  "Last_Login",
+]);
+
+let FIXXIR_RUNTIME_STAFF_ = null;
+
 function doGet() {
   return HtmlService.createHtmlOutputFromFile("Index")
     .setTitle("Fixxir Operations")
@@ -369,6 +389,8 @@ function initializeFixxir(spreadsheetId) {
   ensureFinanceOperationsSchema_(ss);
 
   ensureAuditIdentitySchema_(ss);
+
+  ensureStaffAuthSchema_(ss);
 
   const requiredSheets = Object.values(FIXXIR.sheets);
   const missing = requiredSheets.filter((name) => !ss.getSheetByName(name));
@@ -4635,51 +4657,389 @@ function objectMap_(rows, key) {
 /* ---------------- Validation / serialization ---------------- */
 
 function assertAuthorized_() {
-  const allowedCsv =
-    PropertiesService.getScriptProperties().getProperty(
-      "FIXXIR_ALLOWED_EMAILS",
-    ) || "";
-  if (!allowedCsv) return true;
-
-  const allowed = allowedCsv
-    .split(",")
-    .map((x) => x.trim().toLowerCase())
-    .filter(Boolean);
-  const email = String(Session.getActiveUser().getEmail() || "").toLowerCase();
-
-  if (!email || !allowed.includes(email)) {
-    throw new Error(
-      "This Google account is not authorized to use Fixxir Operations.",
-    );
-  }
+  requireRuntimeStaff_();
   return true;
 }
 
-/* FIXXIR_PER_USER_AUDIT_V1 */
-
 function currentUser_() {
-  const email = String(Session.getActiveUser().getEmail() || "")
-    .trim()
-    .toLowerCase();
+  return requireRuntimeStaff_().email;
+}
 
-  if (!email) {
-    throw new Error(
-      "Fixxir could not identify the signed-in user. " +
-      "Sign in with an authorized Google account and reopen the app."
-    );
-  }
-
-  return email;
+function currentStaff_() {
+  return requireRuntimeStaff_();
 }
 
 function getCurrentUserIdentity() {
-  assertAuthorized_();
+  const staff = requireRuntimeStaff_();
   return {
-    email: currentUser_(),
+    email: staff.email,
+    fullName: staff.fullName,
+    role: staff.role,
     effectiveUser: String(Session.getEffectiveUser().getEmail() || "")
       .trim()
-      .toLowerCase()
+      .toLowerCase(),
   };
+}
+
+/* ---------------- Internal Staff Authentication ---------------- */
+
+function ensureStaffAuthSchema_(ss) {
+  ss = ss || getSpreadsheet_();
+
+  let sh = ss.getSheetByName(FIXXIR.sheets.staffUsers);
+  if (!sh) sh = ss.insertSheet(FIXXIR.sheets.staffUsers);
+
+  const lastCol = sh.getLastColumn();
+
+  if (!lastCol) {
+    sh.getRange(1, 1, 1, FIXXIR_STAFF_USER_HEADERS.length)
+      .setValues([FIXXIR_STAFF_USER_HEADERS]);
+    sh.setFrozenRows(1);
+    return sh;
+  }
+
+  const headers = sh
+    .getRange(1, 1, 1, lastCol)
+    .getValues()[0]
+    .map((header) => String(header || "").trim());
+
+  const missing = FIXXIR_STAFF_USER_HEADERS.filter(
+    (header) => !headers.includes(header),
+  );
+
+  if (missing.length) {
+    sh.getRange(1, lastCol + 1, 1, missing.length)
+      .setValues([missing]);
+  }
+
+  sh.setFrozenRows(1);
+  return sh;
+}
+
+function loginStaff(email, pin) {
+  ensureStaffAuthSchema_(getSpreadsheet_());
+
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const cleanPin = String(pin || "").trim();
+
+  if (!normalizedEmail || !cleanPin) {
+    throw new Error("Enter your staff email and PIN.");
+  }
+
+  const staff = getRecords_(FIXXIR.sheets.staffUsers).find(
+    (row) =>
+      String(row.Email || "").trim().toLowerCase() === normalizedEmail,
+  );
+
+  if (!staff || String(staff.Status || "Active") !== "Active") {
+    throw new Error("Invalid staff email or PIN.");
+  }
+
+  if (
+    String(staff.PIN_Hash || "") !==
+    staffPinHash_(cleanPin, staff.PIN_Salt)
+  ) {
+    throw new Error("Invalid staff email or PIN.");
+  }
+
+  const token = Utilities.getUuid() + Utilities.getUuid();
+  const session = {
+    staffId: staff.Staff_ID,
+    email: normalizedEmail,
+    fullName: clean_(staff.Full_Name) || normalizedEmail,
+    role: clean_(staff.Role) || "Staff",
+  };
+
+  putStaffSession_(token, session);
+
+  updateRecordById_(
+    FIXXIR.sheets.staffUsers,
+    "Staff_ID",
+    staff.Staff_ID,
+    { Last_Login: new Date() },
+  );
+
+  return { token, user: session };
+}
+
+function resumeStaffSession(token) {
+  const session = getStaffSession_(token);
+  if (!session) throw new Error("STAFF_SESSION_EXPIRED");
+
+  putStaffSession_(token, session);
+  return { ok: true, user: session };
+}
+
+function logoutStaff(token) {
+  const key = staffSessionKey_(token);
+  if (key) CacheService.getScriptCache().remove(key);
+  return { ok: true };
+}
+
+function invokeWithStaffSession(methodName, hasArg, arg, token) {
+  const session = getStaffSession_(token);
+  if (!session) throw new Error("STAFF_SESSION_EXPIRED");
+
+  const method = String(methodName || "").trim();
+
+  if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(method)) {
+    throw new Error("Invalid Fixxir method.");
+  }
+
+  const blocked = [
+    "loginStaff",
+    "resumeStaffSession",
+    "logoutStaff",
+    "invokeWithStaffSession",
+    "adminCreateStaffUser",
+    "adminResetStaffPin",
+    "adminSetStaffStatus",
+    "adminListStaffUsers",
+    "initializeFixxir",
+    "setupFixxir",
+    "setAllowedEmails",
+  ];
+
+  if (blocked.includes(method) || method.endsWith("_")) {
+    throw new Error("This Fixxir method cannot be called from the app.");
+  }
+
+  const fn = globalThis[method];
+  if (typeof fn !== "function") {
+    throw new Error("Unknown Fixxir method: " + method);
+  }
+
+  FIXXIR_RUNTIME_STAFF_ = session;
+  putStaffSession_(token, session);
+
+  try {
+    return hasArg ? fn(arg) : fn();
+  } finally {
+    FIXXIR_RUNTIME_STAFF_ = null;
+  }
+}
+
+function requireRuntimeStaff_() {
+  if (!FIXXIR_RUNTIME_STAFF_) {
+    throw new Error("STAFF_SESSION_EXPIRED");
+  }
+  return FIXXIR_RUNTIME_STAFF_;
+}
+
+function getStaffSession_(token) {
+  const key = staffSessionKey_(token);
+  if (!key) return null;
+
+  const raw = CacheService.getScriptCache().get(key);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
+}
+
+function putStaffSession_(token, session) {
+  const key = staffSessionKey_(token);
+  if (!key) throw new Error("Invalid staff session.");
+
+  CacheService.getScriptCache().put(
+    key,
+    JSON.stringify(session),
+    21600,
+  );
+}
+
+function staffSessionKey_(token) {
+  const cleanToken = String(token || "").trim();
+  if (!cleanToken) return "";
+  return "FIXXIR_STAFF_SESSION_" + staffDigest_(cleanToken);
+}
+
+function staffPinHash_(pin, salt) {
+  return staffDigest_(
+    String(salt || "") +
+      "|" +
+      String(pin || "") +
+      "|" +
+      staffAuthPepper_(),
+  );
+}
+
+function staffAuthPepper_() {
+  const props = PropertiesService.getScriptProperties();
+  let pepper = props.getProperty("FIXXIR_STAFF_AUTH_PEPPER");
+
+  if (!pepper) {
+    pepper = Utilities.getUuid() + Utilities.getUuid();
+    props.setProperty("FIXXIR_STAFF_AUTH_PEPPER", pepper);
+  }
+
+  return pepper;
+}
+
+function staffDigest_(value) {
+  const bytes = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    String(value || ""),
+    Utilities.Charset.UTF_8,
+  );
+
+  return bytes
+    .map((byte) => {
+      const n = byte < 0 ? byte + 256 : byte;
+      return ("0" + n.toString(16)).slice(-2);
+    })
+    .join("");
+}
+
+function assertScriptOwnerEditor_() {
+  const active = String(Session.getActiveUser().getEmail() || "")
+    .trim()
+    .toLowerCase();
+
+  const effective = String(Session.getEffectiveUser().getEmail() || "")
+    .trim()
+    .toLowerCase();
+
+  if (!active || !effective || active !== effective) {
+    throw new Error(
+      "Run this staff-admin function as the Fixxir script owner " +
+        "from the Apps Script editor.",
+    );
+  }
+
+  return active;
+}
+
+function adminCreateStaffUser(email, fullName, pin, role) {
+  const owner = assertScriptOwnerEditor_();
+  ensureStaffAuthSchema_(getSpreadsheet_());
+
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const name = clean_(fullName);
+  const cleanPin = String(pin || "").trim();
+  const staffRole = clean_(role) || "Staff";
+
+  if (!normalizedEmail || !normalizedEmail.includes("@")) {
+    throw new Error("Enter a valid staff email.");
+  }
+
+  if (!name) throw new Error("Staff full name is required.");
+
+  if (!/^\d{4,10}$/.test(cleanPin)) {
+    throw new Error("Staff PIN must contain 4 to 10 digits.");
+  }
+
+  const existing = getRecords_(FIXXIR.sheets.staffUsers).find(
+    (row) =>
+      String(row.Email || "").trim().toLowerCase() === normalizedEmail,
+  );
+
+  if (existing) {
+    throw new Error(
+      "A Fixxir staff account already exists for " + normalizedEmail,
+    );
+  }
+
+  const salt = Utilities.getUuid();
+  const id = generateId_(FIXXIR.sheets.staffUsers);
+
+  appendRecord_(FIXXIR.sheets.staffUsers, {
+    Staff_ID: id,
+    Full_Name: name,
+    Email: normalizedEmail,
+    PIN_Salt: salt,
+    PIN_Hash: staffPinHash_(cleanPin, salt),
+    Role: staffRole,
+    Status: "Active",
+    Created_At: new Date(),
+    Created_By: owner,
+  });
+
+  return {
+    Staff_ID: id,
+    Full_Name: name,
+    Email: normalizedEmail,
+    Role: staffRole,
+    Status: "Active",
+  };
+}
+
+function adminResetStaffPin(email, newPin) {
+  assertScriptOwnerEditor_();
+  ensureStaffAuthSchema_(getSpreadsheet_());
+
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const cleanPin = String(newPin || "").trim();
+
+  if (!/^\d{4,10}$/.test(cleanPin)) {
+    throw new Error("Staff PIN must contain 4 to 10 digits.");
+  }
+
+  const staff = getRecords_(FIXXIR.sheets.staffUsers).find(
+    (row) =>
+      String(row.Email || "").trim().toLowerCase() === normalizedEmail,
+  );
+
+  if (!staff) throw new Error("Staff user not found.");
+
+  const salt = Utilities.getUuid();
+
+  updateRecordById_(
+    FIXXIR.sheets.staffUsers,
+    "Staff_ID",
+    staff.Staff_ID,
+    {
+      PIN_Salt: salt,
+      PIN_Hash: staffPinHash_(cleanPin, salt),
+    },
+  );
+
+  return true;
+}
+
+function adminSetStaffStatus(email, status) {
+  assertScriptOwnerEditor_();
+  ensureStaffAuthSchema_(getSpreadsheet_());
+
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  const cleanStatus = clean_(status);
+
+  if (!["Active", "Disabled"].includes(cleanStatus)) {
+    throw new Error("Status must be Active or Disabled.");
+  }
+
+  const staff = getRecords_(FIXXIR.sheets.staffUsers).find(
+    (row) =>
+      String(row.Email || "").trim().toLowerCase() === normalizedEmail,
+  );
+
+  if (!staff) throw new Error("Staff user not found.");
+
+  updateRecordById_(
+    FIXXIR.sheets.staffUsers,
+    "Staff_ID",
+    staff.Staff_ID,
+    { Status: cleanStatus },
+  );
+
+  return true;
+}
+
+function adminListStaffUsers() {
+  assertScriptOwnerEditor_();
+  ensureStaffAuthSchema_(getSpreadsheet_());
+
+  return getRecords_(FIXXIR.sheets.staffUsers).map((row) => ({
+    Staff_ID: row.Staff_ID,
+    Full_Name: row.Full_Name,
+    Email: row.Email,
+    Role: row.Role,
+    Status: row.Status,
+    Last_Login: row.Last_Login,
+  }));
 }
 
 function requireFields_(obj, fields) {

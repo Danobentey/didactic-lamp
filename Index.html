@@ -515,6 +515,7 @@
       }
       /* FIXXIR_UI_CLEANUP_V1 */
       /* FIXXIR_BULK_WORKFLOW_UI_V2 */
+    /* FIXXIR_STAFF_AUTH_UI_V1 */
   </style>
   </head>
   <body>
@@ -559,7 +560,7 @@
             </button>
             <h1 id="pageTitle">Dashboard</h1>
           </div>
-          <div class="user" id="userLabel"></div>
+          <div class="user" id="userLabel"></div> <button class="btn small" onclick="signOutStaff()">Sign out</button>
         </header>
         <div class="content" id="content"></div>
       </main>
@@ -1643,12 +1644,38 @@
       </div>
     </div>
 
-    <div class="toast" id="toast"></div>
+    <div class="modal" id="staffLoginModal">
+  <div class="modal-box" style="width:min(480px,100%)">
+    <div class="modal-head"><h3>Fixxir Staff Login</h3></div>
+    <form id="staffLoginForm" onsubmit="submitStaffLogin(event)">
+      <div class="modal-body">
+        <div class="form-grid" style="grid-template-columns:1fr">
+          <div>
+            <label class="required">Staff email</label>
+            <input class="input" type="email" id="staffLoginEmail" autocomplete="username" required />
+          </div>
+          <div>
+            <label class="required">PIN</label>
+            <input class="input" type="password" inputmode="numeric" pattern="[0-9]{4,10}" id="staffLoginPin" autocomplete="current-password" required />
+          </div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:12px">Use the email and PIN assigned to you by Fixxir.</div>
+        <div id="staffLoginError" style="display:none;margin-top:12px;color:#b42318;font-weight:700"></div>
+      </div>
+      <div class="modal-foot"><button class="btn primary" type="submit">Sign in</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
 
     <script>
   let SETTLEMENT_ALLOCATION_SEQ = 0;
   let FINANCE_OPS_TIMER = null;
 
+      let STAFF_TOKEN =
+        localStorage.getItem("fixxir_staff_token") || "";
+      let STAFF_USER = null;
       let BOOT = null;
       let CURRENT_PAGE = "dashboard";
       let CUSTOMER_TIMER = null;
@@ -1668,34 +1695,163 @@
       let QUOTE_ITEM_SEQ = 0;
 
       window.addEventListener("load", async () => {
+        await startFixxirApp();
+      });
+
+      async function startFixxirApp() {
+        showLoading(true);
+
         try {
-          showLoading(true);
-          BOOT = await server("getBootstrapData");
-          document.getElementById("userLabel").textContent = BOOT.user || "";
-          populateStaticSelects();
-          renderDashboard(BOOT.dashboard);
-        } catch (e) {
-          document.getElementById("content").innerHTML = errorPanel(
-            e.message || e,
-          );
+          if (!STAFF_TOKEN) {
+            showStaffLogin();
+            return;
+          }
+
+          try {
+            const resumed = await authServer(
+              "resumeStaffSession",
+              STAFF_TOKEN,
+            );
+            STAFF_USER = resumed.user || null;
+          } catch (error) {
+            clearStaffSession();
+            showStaffLogin();
+            return;
+          }
+
+          await loadAuthenticatedFixxir();
         } finally {
           showLoading(false);
         }
-      });
+      }
 
-      function server(fn, arg) {
+      async function loadAuthenticatedFixxir() {
+        BOOT = await server("getBootstrapData");
+
+        document.getElementById("userLabel").textContent =
+          STAFF_USER?.fullName ||
+          BOOT.user ||
+          "";
+
+        populateStaticSelects();
+        renderDashboard(BOOT.dashboard);
+      }
+
+      function showStaffLogin(message) {
+        const errorBox = document.getElementById("staffLoginError");
+
+        if (errorBox) {
+          errorBox.textContent = message || "";
+          errorBox.style.display = message ? "block" : "none";
+        }
+
+        document.getElementById("staffLoginModal")?.classList.add("open");
+
+        setTimeout(() => {
+          document.getElementById("staffLoginEmail")?.focus();
+        }, 50);
+      }
+
+      async function submitStaffLogin(event) {
+        event.preventDefault();
+
+        const email =
+          document.getElementById("staffLoginEmail")?.value || "";
+        const pin =
+          document.getElementById("staffLoginPin")?.value || "";
+
+        showLoading(true);
+
+        try {
+          const result = await authServer(
+            "loginStaff",
+            email,
+            pin,
+          );
+
+          STAFF_TOKEN = result.token;
+          STAFF_USER = result.user || null;
+
+          localStorage.setItem("fixxir_staff_token", STAFF_TOKEN);
+
+          closeModal("staffLoginModal");
+          await loadAuthenticatedFixxir();
+        } catch (error) {
+          showStaffLogin(error.message || "Unable to sign in.");
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      async function signOutStaff() {
+        const oldToken = STAFF_TOKEN;
+        clearStaffSession();
+
+        if (oldToken) {
+          try {
+            await authServer("logoutStaff", oldToken);
+          } catch (error) {}
+        }
+
+        BOOT = null;
+        STAFF_USER = null;
+        showStaffLogin();
+      }
+
+      function clearStaffSession() {
+        STAFF_TOKEN = "";
+        STAFF_USER = null;
+        localStorage.removeItem("fixxir_staff_token");
+      }
+
+      function authServer(fn, ...args) {
         return new Promise((resolve, reject) => {
-          let runner = google.script.run
+          const runner = google.script.run
             .withSuccessHandler(resolve)
             .withFailureHandler((err) =>
-              reject(new Error(err && err.message ? err.message : String(err))),
+              reject(
+                new Error(
+                  err && err.message
+                    ? err.message
+                    : String(err),
+                ),
+              ),
             );
-          if (arg === undefined) runner[fn]();
-          else runner[fn](arg);
+
+          runner[fn](...args);
         });
       }
 
-      function navigate(page, el) {
+      function server(fn, arg) {
+        return new Promise((resolve, reject) => {
+          const runner = google.script.run
+            .withSuccessHandler(resolve)
+            .withFailureHandler((err) => {
+              const message =
+                err && err.message
+                  ? err.message
+                  : String(err);
+
+              if (message.includes("STAFF_SESSION_EXPIRED")) {
+                clearStaffSession();
+                showStaffLogin(
+                  "Your Fixxir session expired. Sign in again.",
+                );
+              }
+
+              reject(new Error(message));
+            });
+
+          runner.invokeWithStaffSession(
+            fn,
+            arg !== undefined,
+            arg === undefined ? null : arg,
+            STAFF_TOKEN,
+          );
+        });
+      }
+
+            function navigate(page, el) {
         CURRENT_PAGE = page;
         document
           .querySelectorAll(".nav button")
