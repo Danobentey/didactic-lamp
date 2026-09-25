@@ -4219,16 +4219,32 @@
       function openRepairEdit() {
         if (!CURRENT_REPAIR) return;
 
-        const r = CURRENT_REPAIR.repair;
+        const r = CURRENT_REPAIR.repair || {};
 
-        document.getElementById("repairEditForm").reset();
-        document.getElementById("editRepairId").value = r.Repair_ID || "";
-        document.getElementById("repairEditTitle").textContent =
-          `Edit ${r.Repair_ID}`;
+        const form = document.getElementById("repairEditForm");
+        if (!form) {
+          toast("Repair edit form is unavailable. Refresh the app.", true);
+          return;
+        }
+
+        form.reset();
+
+        const setValue = (id, value) => {
+          const el = document.getElementById(id);
+          if (el) el.value = value ?? "";
+        };
+
+        const setText = (id, value) => {
+          const el = document.getElementById(id);
+          if (el) el.textContent = value ?? "";
+        };
+
+        setValue("editRepairId", r.Repair_ID || "");
+        setText("repairEditTitle", `Edit ${r.Repair_ID || ""}`);
 
         fillSelect(
           "editRepairTechnician",
-          BOOT.technicians.map((t) => ({
+          (BOOT.technicians || []).map((t) => ({
             value: t.Technician_ID,
             label: t.Full_Name,
           })),
@@ -4247,26 +4263,27 @@
           "Select QA status",
         );
 
-        document.getElementById("editRepairTechnician").value =
-          r.Technician_ID || "";
-        document.getElementById("editRepairStatus").value =
-          r.Repair_Status || "";
-        document.getElementById("editRepairDateView").textContent =
-          dateOnly(r.Repair_Date || r.Date_Received) || "—";
-        document.getElementById("editRepairFinal").value =
+        setValue("editRepairTechnician", r.Technician_ID || "");
+        setValue("editRepairStatus", r.Repair_Status || "");
+
+        setText(
+          "editRepairDateView",
+          dateOnly(r.Repair_Date || r.Date_Received) || "—",
+        );
+
+        setValue(
+          "editRepairFinal",
           r.Final_Amount === null || r.Final_Amount === undefined
             ? ""
-            : r.Final_Amount;
-        document.getElementById("editRepairQA").value = r.QA_Status || "";
-        document.getElementById("editRepairCompleted").value = dateOnly(
-          r.Date_Completed,
+            : r.Final_Amount,
         );
-        document.getElementById("editRepairDiagnosis").value =
-          r.Diagnosis || "";
-        document.getElementById("editRepairQANotes").value = r.QA_Notes || "";
-        document.getElementById("editRepairNotes").value = r.Notes || "";
 
-        document.getElementById("repairEditModal").classList.add("open");
+        setValue("editRepairQA", r.QA_Status || "");
+        setValue("editRepairCompleted", dateOnly(r.Date_Completed));
+        setValue("editRepairDiagnosis", r.Diagnosis || "");
+        setValue("editRepairQANotes", r.QA_Notes || "");
+
+        document.getElementById("repairEditModal")?.classList.add("open");
       }
 
       function repairEditStatusChanged() {
