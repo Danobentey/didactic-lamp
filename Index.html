@@ -4189,7 +4189,6 @@
           <div style="margin-top:14px"><label>Diagnosis</label><div>${nl2br(esc(r.Diagnosis || "Not yet recorded"))}</div></div>
           <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn dark" onclick="openRepairEdit()">Edit Repair</button>
-            <button class="btn" onclick="openEntityNote('Repair',CURRENT_REPAIR?.repair?.Repair_ID)">+ Add Note</button>
             <button class="btn primary" onclick="openFinanceForRepair('Credit')">+ Customer Payment</button>
             <button class="btn" onclick="openFinanceForRepair('Debit')">+ Repair Expense</button>
           </div>
