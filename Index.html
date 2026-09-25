@@ -514,7 +514,8 @@
         }
       }
       /* FIXXIR_UI_CLEANUP_V1 */
-    </style>
+      /* FIXXIR_BULK_WORKFLOW_UI_V2 */
+  </style>
   </head>
   <body>
     <div class="loading" id="loading">Working…</div>
@@ -639,7 +640,7 @@
                   id="repairDeviceType"
                 ></select>
               </div>
-          <div><label class="required">Repair date</label><input class="input" type="date" name="Repair_Date" id="repairDate" required></div>
+          <div><label>Repair date</label><input class="input" type="date" name="Repair_Date" id="repairDate"></div>
               <div>
                 <label class="required">Brand</label
                 ><input
@@ -756,9 +757,13 @@
                   class="select"
                   name="Repair_Status"
                   id="editRepairStatus"
+                  onchange="repairEditStatusChanged()"
                 ></select>
               </div>
-          <div><label class="required">Repair date</label><input class="input" type="date" name="Repair_Date" id="editRepairDate" required></div>
+          <div>
+                <label>Repair date</label>
+                <div class="input" id="editRepairDateView" style="background:#f7f9fb;color:var(--muted)">—</div>
+              </div>
 
               <div>
                 <label>Final amount (₦)</label>
@@ -809,14 +814,7 @@
                 ></textarea>
               </div>
 
-              <div class="full">
-                <label>Notes</label>
-                <textarea
-                  class="textarea"
-                  name="Notes"
-                  id="editRepairNotes"
-                ></textarea>
-              </div>
+              
             </div>
           </div>
 
@@ -904,7 +902,8 @@
               <div>
                 <label>Sale status</label
                 ><select class="select" name="Sales_Status">
-                  <option selected>Completed</option>
+                  <option selected>Pending Fulfilment</option>
+                  <option>Completed</option>
                   <option>Draft</option>
                   <option>Cancelled</option>
                 </select>
@@ -1006,6 +1005,10 @@
                   name="Amount"
                   required
                 />
+              </div>
+              <div>
+                <label class="required">Payment date</label>
+                <input class="input" type="date" name="Date" id="salePaymentDate" required />
               </div>
               <div>
                 <label class="required">Payment method</label
@@ -1475,6 +1478,87 @@
   </div>
 </div>
 
+<div class="modal" id="saleEditModal">
+  <div class="modal-box" style="width:min(700px,100%)">
+    <div class="modal-head"><h3 id="saleEditTitle">Edit Sale</h3><button class="close" onclick="closeModal('saleEditModal')">×</button></div>
+    <form id="saleEditForm" onsubmit="submitSaleEdit(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Sales_ID" id="saleEditId">
+        <div class="form-grid">
+          <div><label class="required">Sale date</label><input class="input" type="date" name="Date" id="saleEditDate" required></div>
+          <div><label>Status</label><select class="select" name="Sales_Status" id="saleEditStatus"><option>Pending Fulfilment</option><option>Completed</option><option>Draft</option><option>Cancelled</option></select></div>
+          <div><label>Discount (₦)</label><input class="input" type="number" min="0" step="1" name="Discount_Amount" id="saleEditDiscount"></div>
+          <div class="full"><label>Sale note</label><textarea class="textarea" name="Notes" id="saleEditNotes"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('saleEditModal')">Cancel</button><button class="btn primary" type="submit">Save changes</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="saleExpenseModal">
+  <div class="modal-box" style="width:min(700px,100%)">
+    <div class="modal-head"><h3 id="saleExpenseTitle">Record Sale Expense</h3><button class="close" onclick="closeModal('saleExpenseModal')">×</button></div>
+    <form id="saleExpenseForm" onsubmit="submitSaleExpense(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Sales_ID" id="saleExpenseSalesId">
+        <div class="form-grid">
+          <div><label class="required">Expense date</label><input class="input" type="date" name="Date" id="saleExpenseDate" required></div>
+          <div><label class="required">Category</label><select class="select" name="Category" required><option>Customer Delivery</option><option>Packaging</option><option>Dispatch</option><option>Refund</option><option>Other Sale Expense</option></select></div>
+          <div><label class="required">Amount (₦)</label><input class="input" type="number" min="1" step="1" name="Amount" required></div>
+          <div><label class="required">Payment method</label><select class="select" name="Payment_Method" id="saleExpensePaymentMethod" required></select></div>
+          <div><label>Vendor / payee</label><select class="select" name="Supplier_ID" id="saleExpenseSupplier"></select></div>
+          <div><label>Account</label><input class="input" name="Account" value="Operating"></div>
+          <div class="full"><label>Description</label><input class="input" name="Description"></div>
+          <div><label>Receipt / bank reference</label><input class="input" name="Receipt_Reference"></div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:12px">Vendor acquisition cost belongs in the linked Purchase, not here. Use Sale Expense only for costs specific to serving this customer/sale.</div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('saleExpenseModal')">Cancel</button><button class="btn primary" type="submit">Record expense</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="purchaseEditModal">
+  <div class="modal-box" style="width:min(720px,100%)">
+    <div class="modal-head"><h3 id="purchaseEditTitle">Procurement Details</h3><button class="close" onclick="closeModal('purchaseEditModal')">×</button></div>
+    <form id="purchaseEditForm" onsubmit="submitPurchaseEdit(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Purchase_ID" id="purchaseEditId">
+        <div class="form-grid">
+          <div><label>Vendor</label><select class="select" name="Supplier_ID" id="purchaseEditSupplier"></select></div>
+          <div><label>Purchase date</label><input class="input" type="date" name="Purchase_Date" id="purchaseEditDate"></div>
+          <div><label>Status</label><select class="select" name="Purchase_Status" id="purchaseEditStatus"><option>Sourcing</option><option>Ordered</option><option>Part Received</option><option>Received</option><option>Cancelled</option></select></div>
+          <div><label>Vendor invoice / reference</label><input class="input" name="Supplier_Reference" id="purchaseEditReference"></div>
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:12px">Purchase Date is the actual vendor transaction date. It may remain blank while the request is still Sourcing.</div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('purchaseEditModal')">Cancel</button><button class="btn primary" type="submit">Save procurement</button></div>
+    </form>
+  </div>
+</div>
+
+<div class="modal" id="purchaseExpenseModal">
+  <div class="modal-box" style="width:min(700px,100%)">
+    <div class="modal-head"><h3 id="purchaseExpenseTitle">Add Shared Purchase Cost</h3><button class="close" onclick="closeModal('purchaseExpenseModal')">×</button></div>
+    <form id="purchaseExpenseForm" onsubmit="submitPurchaseExpense(event)">
+      <div class="modal-body">
+        <input type="hidden" name="Purchase_ID" id="purchaseExpensePurchaseId">
+        <div class="form-grid">
+          <div><label>Type</label><select class="select" name="Expense_Type"><option>Logistics</option><option>Express Logistics</option><option>Clearing</option><option>Handling</option><option>Delivery</option><option>Packaging</option><option>Other</option></select></div>
+          <div><label class="required">Amount (₦)</label><input class="input" type="number" min="1" step="1" name="Amount" required></div>
+          <div><label>Allocate</label><select class="select" name="Allocation_Method"><option>By Value</option><option>By Quantity</option></select></div>
+          <div><label>Payee</label><input class="input" name="Payee"></div>
+          <div class="full"><label>Description</label><input class="input" name="Description"></div>
+          <div class="full"><label>Notes</label><textarea class="textarea" name="Notes"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn" onclick="closeModal('purchaseExpenseModal')">Cancel</button><button class="btn primary" type="submit">Add shared cost</button></div>
+    </form>
+  </div>
+</div>
+
 <div class="modal" id="financeModal">
       <div class="modal-box" style="width: min(650px, 100%)">
         <div class="modal-head">
@@ -1515,6 +1599,10 @@
                   name="Amount"
                   required
                 />
+              </div>
+              <div>
+                <label class="required">Payment / expense date</label>
+                <input class="input" type="date" name="Date" id="financeDate" required />
               </div>
               <div>
                 <label class="required">Payment method</label
@@ -1687,6 +1775,7 @@
         try {
           const data = await server("refreshDashboard");
           BOOT.dashboard = data;
+          if (CURRENT_PAGE !== "dashboard") return;
           renderDashboard(data);
         } catch (e) {
           toast(e.message, true);
@@ -1698,19 +1787,62 @@
       function renderDashboard(d) {
         document.getElementById("content").innerHTML = `
       <div class="toolbar">
-        <div><h2>Operations at a glance</h2><div class="muted" style="margin-top:5px">Repairs, cash movement and collections.</div></div>
-        <div class="actions"><button class="btn primary" onclick="openNewRepair()">+ New Repair</button><button class="btn" onclick="refreshDashboardPage()">Refresh</button></div>
+        <div>
+          <h2>Operations at a glance</h2>
+          <div class="muted" style="margin-top:5px">Repairs, sales and customer balances.</div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" onclick="openNewRepair()">+ New Repair</button>
+          <button class="btn dark" onclick="openNewSale()">+ New Sale</button>
+          <button class="btn" onclick="refreshDashboardPage()">Refresh</button>
+        </div>
       </div>
+
       <div class="grid kpis">
         ${kpi("Open repairs", d.openRepairs, "Active jobs in the pipeline")}
         ${kpi("Ready for pickup", d.readyForPickup, "Devices waiting for customers")}
         ${kpi("Outstanding repair balances", money(d.outstandingRepairBalances), "Uncollected repair revenue")}
-        ${kpi("Net cash today", money(d.netToday), `${money(d.todayCredits)} in · ${money(d.todayDebits)} out`)}
       </div>
-      <div class="card section">
-        <div class="section-head"><h3>Recent repairs</h3><button class="btn small" onclick="goRepairs()">View all</button></div>
-        ${repairMiniTable(d.recentRepairs || [])}
+
+      <div class="grid" style="grid-template-columns:repeat(2,minmax(0,1fr));align-items:start">
+        <div class="card section">
+          <div class="section-head">
+            <h3>Last 5 uncompleted repairs</h3>
+            <button class="btn small" onclick="goRepairs()">View all</button>
+          </div>
+          ${repairMiniTable(d.recentOpenRepairs || [])}
+        </div>
+
+        <div class="card section">
+          <div class="section-head">
+            <h3>Last 5 sales</h3>
+            <button class="btn small" onclick="goSales()">View all</button>
+          </div>
+          ${saleMiniTable(d.recentSales || [])}
+        </div>
       </div>`;
+      }
+
+      function saleMiniTable(rows) {
+        if (!rows.length) return '<div class="empty">No sales yet.</div>';
+
+        return `<div class="table-wrap"><table>
+          <thead><tr><th>Sale</th><th>Customer</th><th>Total</th><th>Balance</th></tr></thead>
+          <tbody>${rows.map((sale) => `
+            <tr class="clickable" onclick="openSale('${escAttr(sale.Sales_ID)}')">
+              <td><b>${esc(sale.Sales_ID)}</b><br><span class="muted">${dateOnly(sale.Date)}</span></td>
+              <td>${esc(sale.Customer_Name || "")}<br><span class="muted">${esc(sale.Item_Summary || "")}</span></td>
+              <td class="money">${money(sale.Total_Amount)}</td>
+              <td class="money">${money(sale.Balance_Calc)}</td>
+            </tr>`).join("")}
+          </tbody>
+        </table></div>`;
+      }
+
+      function goSales() {
+        const btn =
+          document.querySelector('.nav button[data-page="sales"]');
+        navigate("sales", btn);
       }
 
       function kpi(label, value, note) {
@@ -1755,7 +1887,9 @@
           const q = document.getElementById("repairQ")?.value || "";
           const status = document.getElementById("repairStatus")?.value || "";
           const rows = await server("listRepairs", { q, status });
+          if (CURRENT_PAGE !== "repairs") return;
           const box = document.getElementById("repairsList");
+          if (!box) return;
           if (!rows.length) {
             box.innerHTML = '<div class="empty">No matching repairs.</div>';
             return;
@@ -1891,6 +2025,7 @@
             status,
             paymentStatus,
           });
+          if (CURRENT_PAGE !== "sales") return;
           const s = data.summary || {};
 
           const kpis = document.getElementById("salesKpis");
@@ -1903,6 +2038,7 @@
           }
 
           const box = document.getElementById("salesList");
+          if (!box) return;
           const rows = data.sales || [];
 
           if (!rows.length) {
@@ -2175,6 +2311,7 @@
         const customer = data.customer || {};
         const summary = data.summary || {};
         const items = data.items || [];
+        const purchases = data.purchases || [];
 
         document.getElementById("saleDetailTitle").textContent =
           `${order.Sales_ID || "Sale"} · ${customer.Full_Name || ""}`;
@@ -2185,13 +2322,15 @@
           <div class="detail-list">
             ${detail("Customer", `${esc(customer.Full_Name || "")}<br><span class="muted">${esc(customer.Phone_Primary || "")}</span>`)}
             ${detail("Status", statusBadge(order.Sales_Status || ""))}
-            ${detail("Date", dateOnly(order.Date) || "—")}
+            ${detail("Sale date", dateOnly(order.Date) || "—")}
             ${detail("Payment", salePaymentBadge(summary.paymentStatus))}
             ${detail("Items", String(items.length))}
             ${detail("Created by", esc(order.Created_By || "—"))}
           </div>
           <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
-            ${summary.balance > 0 ? '<button class="btn primary" onclick="openSalePayment()">+ Record Payment</button>' : ""}
+            <button class="btn dark" onclick="openSaleEdit()">Edit Sale</button>
+            ${summary.balance > 0 ? '<button class="btn primary" onclick="openSalePayment()">+ Customer Payment</button>' : ""}
+            <button class="btn" onclick="openSaleExpense()">+ Sale Expense</button>
           </div>
         </div>
         <div class="finance-box">
@@ -2201,45 +2340,144 @@
           <div class="finance-row big"><span>Total</span><span>${money(summary.total)}</span></div>
           <div class="finance-row"><span>Paid</span><b>${money(summary.paid)}</b></div>
           <div class="finance-row"><span>Balance</span><b>${money(summary.balance)}</b></div>
-          <div class="finance-row"><span>Recorded / estimated cost</span><b>${money(summary.costTotal)}</b></div>
-          <div class="finance-row"><span>Cost status</span><b>${esc(summary.costStatus || "Pending")}</b></div>
-          <div class="finance-row big"><span>Gross profit</span><span>${summary.costStatus === "Known" ? money(summary.grossProfit) : "Pending cost"}</span></div>
+          <div class="finance-row"><span>Procurement / COGS</span><b>${summary.costStatus === "Known" ? money(summary.costTotal) : "Pending"}</b></div>
+          <div class="finance-row"><span>Sale expenses</span><b>${money(summary.saleExpenses)}</b></div>
+          <div class="finance-row"><span>Gross margin</span><b>${summary.costStatus === "Known" ? money(summary.grossProfit) : "Pending"}</b></div>
+          <div class="finance-row big"><span>Contribution</span><span>${summary.costStatus === "Known" ? money(summary.contribution) : "Pending cost"}</span></div>
         </div>
       </div>
 
       <div style="margin-top:24px" class="section-head"><h3>Items</h3></div>
       ${saleItemsTable(items)}
 
-      <div style="margin-top:24px" class="section-head"><h3>Payments</h3></div>
+      <div style="margin-top:24px" class="section-head"><h3>Procurement</h3></div>
+      ${salePurchasesTable(purchases)}
+
+      <div style="margin-top:24px" class="section-head"><h3>Payments & sale expenses</h3></div>
       ${transactionTable(data.transactions || [])}`;
       }
 
       function saleItemsTable(rows) {
-        if (!rows.length)
-          return '<div class="empty" style="padding:16px">No sale items.</div>';
+        if (!rows.length) return '<div class="empty" style="padding:16px">No sale items.</div>';
 
         return `<div class="table-wrap"><table>
-      <thead><tr><th>Item</th><th>Source</th><th>SKU</th><th>IMEI / Serial</th><th>Qty</th><th>Unit Price</th><th>Unit Cost</th><th>Cost Status</th><th>Total</th><th></th></tr></thead>
-      <tbody>${rows
-        .map(
-          (item) => `<tr>
-        <td><b>${esc(item.Product_Name)}</b></td>
-        <td>${esc(item.Item_Source || "Ad-hoc")}</td>
-        <td>${esc(item.IMEI_or_Serial || "")}</td>
-        <td>${esc(item.Quantity)}</td>
-        <td class="money">${money(item.Unit_Price)}</td>
-        <td class="money">${hasDisplayValue(item.Unit_Cost) ? money(item.Unit_Cost) : "—"}</td>
-        <td>${esc(item.Cost_Status || "Pending")}</td>
-        <td class="money">${money(item.Line_Total)}</td>
-        <td><button class="btn small" onclick='openSaleCostEditor(${JSON.stringify(item).replace(/'/g, "&#39;")})'>${item.Cost_Status === "Known" ? "Edit cost" : "Set cost"}</button></td>
-      </tr>`,
-        )
-        .join("")}</tbody></table></div>`;
+          <thead><tr><th>Item</th><th>Source</th><th>IMEI / Serial</th><th>Qty</th><th>Unit price</th><th>Procurement cost</th><th>Cost status</th><th>Total</th></tr></thead>
+          <tbody>${rows.map((item) => `<tr>
+            <td><b>${esc(item.Product_Name)}</b></td>
+            <td>${esc(item.Item_Source || "Ad-hoc")}</td>
+            <td>${esc(item.IMEI_or_Serial || "")}</td>
+            <td>${esc(item.Quantity)}</td>
+            <td class="money">${money(item.Unit_Price)}</td>
+            <td class="money">${hasDisplayValue(item.Unit_Cost) ? money(item.Unit_Cost) : "Pending"}</td>
+            <td>${esc(item.Cost_Status || "Pending")}</td>
+            <td class="money">${money(item.Line_Total)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>`;
+      }
+
+      function salePurchasesTable(rows) {
+        if (!rows.length) return '<div class="empty" style="padding:16px">No procurement request linked yet.</div>';
+
+        return `<div class="table-wrap"><table>
+          <thead><tr><th>Purchase</th><th>Vendor</th><th>Status</th><th>Date</th><th>Landed cost</th></tr></thead>
+          <tbody>${rows.map((purchase) => `<tr class="clickable" onclick="openPurchase('${escAttr(purchase.Purchase_ID)}')">
+            <td><b>${esc(purchase.Purchase_ID)}</b></td>
+            <td>${esc(purchase.Supplier_ID || "Vendor pending")}</td>
+            <td>${statusBadge(purchase.Purchase_Status || "Sourcing")}</td>
+            <td>${dateOnly(purchase.Purchase_Date || purchase.Request_Date) || "—"}</td>
+            <td class="money">${purchase.Landed_Total === "" ? "Pending" : money(purchase.Landed_Total)}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>`;
       }
 
       function salePaymentBadge(status) {
         const cls = status === "Paid" ? " ready" : "";
         return `<span class="status${cls}">${esc(status || "Unpaid")}</span>`;
+      }
+
+      function openSaleEdit() {
+        if (!CURRENT_SALE) return;
+
+        const order = CURRENT_SALE.order || {};
+        document.getElementById("saleEditForm").reset();
+        document.getElementById("saleEditId").value = order.Sales_ID || "";
+        document.getElementById("saleEditTitle").textContent =
+          `Edit ${order.Sales_ID || "Sale"}`;
+        document.getElementById("saleEditDate").value = dateOnly(order.Date);
+        document.getElementById("saleEditStatus").value =
+          order.Sales_Status || "Pending Fulfilment";
+        document.getElementById("saleEditDiscount").value =
+          order.Discount_Amount || 0;
+        document.getElementById("saleEditNotes").value = order.Notes || "";
+        document.getElementById("saleEditModal").classList.add("open");
+      }
+
+      async function submitSaleEdit(e) {
+        e.preventDefault();
+        showLoading(true);
+        try {
+          CURRENT_SALE = await server("updateSale", formObject(e.target));
+          closeModal("saleEditModal");
+          renderSaleDetail(CURRENT_SALE);
+          toast(`Updated ${CURRENT_SALE.order.Sales_ID}`);
+          if (CURRENT_PAGE === "sales") await loadSales();
+          BOOT.dashboard = await server("refreshDashboard");
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          showLoading(false);
+        }
+      }
+
+      function openSaleExpense() {
+        if (!CURRENT_SALE) return;
+
+        document.getElementById("saleExpenseForm").reset();
+        document.getElementById("saleExpenseSalesId").value =
+          CURRENT_SALE.order.Sales_ID;
+        document.getElementById("saleExpenseTitle").textContent =
+          `Sale expense · ${CURRENT_SALE.order.Sales_ID}`;
+        document.getElementById("saleExpenseDate").value = localToday_();
+
+        fillSelect(
+          "saleExpensePaymentMethod",
+          BOOT.settings.Payment_Method || [],
+          "Select method",
+        );
+
+        fillSelect(
+          "saleExpenseSupplier",
+          (BOOT.suppliers || []).map((supplier) => ({
+            value: supplier.Supplier_ID,
+            label:
+              supplier.Supplier_Name ||
+              supplier.Company_Name ||
+              supplier.Supplier_ID,
+          })),
+          "No vendor",
+        );
+
+        document.getElementById("saleExpenseModal").classList.add("open");
+      }
+
+      async function submitSaleExpense(e) {
+        e.preventDefault();
+        showLoading(true);
+        try {
+          CURRENT_SALE = await server(
+            "postSaleExpense",
+            formObject(e.target),
+          );
+          closeModal("saleExpenseModal");
+          renderSaleDetail(CURRENT_SALE);
+          toast("Sale expense recorded");
+          if (CURRENT_PAGE === "sales") await loadSales();
+          BOOT.dashboard = await server("refreshDashboard");
+        } catch (err) {
+          toast(err.message, true);
+        } finally {
+          showLoading(false);
+        }
       }
 
       function openSalePayment() {
@@ -2252,6 +2490,8 @@
           CURRENT_SALE.order.Sales_ID;
         document.getElementById("salePaymentTitle").textContent =
           `Record payment · ${CURRENT_SALE.order.Sales_ID}`;
+        document.getElementById("salePaymentDate").value =
+          localToday_();
         document.getElementById("salePaymentAmount").max = String(
           CURRENT_SALE.summary.balance || "",
         );
@@ -2457,6 +2697,8 @@
 
         try {
           const rows = await server("listQuotes", {});
+          if (CURRENT_PAGE !== "sales") return;
+          if (!document.getElementById("quotesList")) return;
           if (!rows.length) {
             box.innerHTML =
               '<div class="empty" style="padding:18px">No quotes yet.</div>';
@@ -2965,7 +3207,7 @@
           <select class="select" id="purchaseSupplierFilter" onchange="loadPurchases()"></select>
           <select class="select" id="purchaseStatusFilter" onchange="loadPurchases()">
             <option value="">All statuses</option>
-            <option>Received</option><option>Ordered</option><option>Part Received</option><option>Cancelled</option>
+            <option>Sourcing</option><option>Received</option><option>Ordered</option><option>Part Received</option><option>Cancelled</option>
           </select>
         </div>
         <div id="purchaseList"><div class="empty">Loading purchases…</div></div>
@@ -3001,6 +3243,7 @@
         catalogQ:document.getElementById('catalogQ')?.value||''
       });
 
+      if(CURRENT_PAGE!=='purchases')return;
       BOOT.suppliers=data.suppliers||BOOT.suppliers||[];
 
       const s=data.summary||{};
@@ -3030,11 +3273,12 @@
     }
 
     box.innerHTML=`<div class="table-wrap"><table>
-      <thead><tr><th>Purchase</th><th>Purchase date</th><th>Vendor</th><th>Status</th><th>Items</th><th>Shared costs</th><th>Landed total</th><th>Cost status</th></tr></thead>
+      <thead><tr><th>Purchase</th><th>Purchase / request date</th><th>Linked sale</th><th>Vendor</th><th>Status</th><th>Items</th><th>Shared costs</th><th>Landed total</th><th>Cost status</th></tr></thead>
       <tbody>${rows.map(p=>`<tr class="clickable" onclick="openPurchase('${escAttr(p.Purchase_ID)}')">
         <td><b>${esc(p.Purchase_ID)}</b><br><span class="muted">${esc(p.Supplier_Reference||'')}</span></td>
-        <td>${dateOnly(p.Purchase_Date)||'—'}</td>
-        <td>${esc(p.Supplier_Name||p.Supplier_ID||'')}</td>
+        <td>${dateOnly(p.Purchase_Date||p.Request_Date)||'—'}</td>
+        <td>${p.Sales_ID?`<b>${esc(p.Sales_ID)}</b>`:'—'}</td>
+        <td>${esc(p.Supplier_Name||p.Supplier_ID||'Vendor pending')}</td>
         <td>${statusBadge(p.Purchase_Status||'')}</td>
         <td class="money">${p.Items_Subtotal===''?'Pending':money(p.Items_Subtotal)}</td>
         <td class="money">${money(p.Additional_Costs)}</td>
@@ -3223,7 +3467,8 @@
       <div class="repair-hero">
         <div>
           <div class="detail-list">
-            ${detail('Vendor',esc(s.Supplier_Name||p.Supplier_ID||'—'))}
+            ${detail('Vendor',esc(s.Supplier_Name||p.Supplier_ID||'Vendor pending'))}
+            ${detail('Linked sale',p.Sales_ID?`<button class="btn small" onclick="openSale('${escAttr(p.Sales_ID)}')">${esc(p.Sales_ID)}</button>`:'—')}
             ${detail('Purchase date',dateOnly(p.Purchase_Date)||'—')}
             ${detail('Status',statusBadge(p.Purchase_Status||''))}
             ${detail('Vendor reference',esc(p.Supplier_Reference||'—'))}
@@ -3233,6 +3478,10 @@
           <div style="margin-top:18px">
             <button class="btn" onclick="openEntityNote('Purchase',CURRENT_PURCHASE?.purchase?.Purchase_ID)">+ Add Note</button>
           </div>
+        </div>
+        <div style="margin-top:18px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn dark" onclick="openPurchaseEdit()">Edit Procurement</button>
+          <button class="btn" onclick="openPurchaseExpense()">+ Shared Cost</button>
         </div>
         <div class="finance-box">
           <div class="kpi-label" style="color:#bfd0df">Landed cost</div>
@@ -3262,6 +3511,79 @@
       <div style="margin-top:24px" class="section-head"><h3>Shared costs</h3></div>
       ${purchaseExpensesTable(expenses)}
     `;
+  }
+
+  function openPurchaseEdit(){
+    if(!CURRENT_PURCHASE)return;
+
+    const p=CURRENT_PURCHASE.purchase||{};
+    document.getElementById('purchaseEditForm').reset();
+    document.getElementById('purchaseEditId').value=p.Purchase_ID||'';
+    document.getElementById('purchaseEditTitle').textContent=
+      `Procurement · ${p.Purchase_ID||''}`;
+
+    fillSelect(
+      'purchaseEditSupplier',
+      (BOOT.suppliers||[]).map(s=>({
+        value:s.Supplier_ID,
+        label:s.Supplier_Name||s.Supplier_ID
+      })),
+      'Vendor pending'
+    );
+
+    document.getElementById('purchaseEditSupplier').value=p.Supplier_ID||'';
+    document.getElementById('purchaseEditDate').value=dateOnly(p.Purchase_Date);
+    document.getElementById('purchaseEditStatus').value=p.Purchase_Status||'Sourcing';
+    document.getElementById('purchaseEditReference').value=p.Supplier_Reference||'';
+
+    document.getElementById('purchaseEditModal').classList.add('open');
+  }
+
+  async function submitPurchaseEdit(e){
+    e.preventDefault();
+    showLoading(true);
+    try{
+      CURRENT_PURCHASE=await server('updatePurchaseHeader',formObject(e.target));
+      closeModal('purchaseEditModal');
+      renderPurchaseDetail(CURRENT_PURCHASE);
+      toast('Procurement updated');
+      if(CURRENT_PAGE==='purchases')await loadPurchases();
+
+      if(CURRENT_PURCHASE.purchase?.Sales_ID){
+        CURRENT_SALE=await server('getSale',CURRENT_PURCHASE.purchase.Sales_ID);
+      }
+    }catch(err){
+      toast(err.message,true);
+    }finally{
+      showLoading(false);
+    }
+  }
+
+  function openPurchaseExpense(){
+    if(!CURRENT_PURCHASE)return;
+
+    document.getElementById('purchaseExpenseForm').reset();
+    document.getElementById('purchaseExpensePurchaseId').value=
+      CURRENT_PURCHASE.purchase.Purchase_ID;
+    document.getElementById('purchaseExpenseTitle').textContent=
+      `Shared cost · ${CURRENT_PURCHASE.purchase.Purchase_ID}`;
+    document.getElementById('purchaseExpenseModal').classList.add('open');
+  }
+
+  async function submitPurchaseExpense(e){
+    e.preventDefault();
+    showLoading(true);
+    try{
+      CURRENT_PURCHASE=await server('addPurchaseExpense',formObject(e.target));
+      closeModal('purchaseExpenseModal');
+      renderPurchaseDetail(CURRENT_PURCHASE);
+      toast('Shared purchase cost added');
+      if(CURRENT_PAGE==='purchases')await loadPurchases();
+    }catch(err){
+      toast(err.message,true);
+    }finally{
+      showLoading(false);
+    }
   }
 
   function purchaseItemsTable(rows){
@@ -3658,6 +3980,7 @@
         settlementQ:document.getElementById('settlementQ')?.value||''
       });
 
+      if(CURRENT_PAGE!=='finance')return;
       const s=data.summary||{};
       const kpis=document.getElementById('financeOpsKpis');
 
@@ -3928,6 +4251,8 @@
           r.Technician_ID || "";
         document.getElementById("editRepairStatus").value =
           r.Repair_Status || "";
+        document.getElementById("editRepairDateView").textContent =
+          dateOnly(r.Repair_Date || r.Date_Received) || "—";
         document.getElementById("editRepairFinal").value =
           r.Final_Amount === null || r.Final_Amount === undefined
             ? ""
@@ -3942,6 +4267,17 @@
         document.getElementById("editRepairNotes").value = r.Notes || "";
 
         document.getElementById("repairEditModal").classList.add("open");
+      }
+
+      function repairEditStatusChanged() {
+        const status =
+          document.getElementById("editRepairStatus")?.value || "";
+        const completed =
+          document.getElementById("editRepairCompleted");
+
+        if (status === "Completed" && completed && !completed.value) {
+          completed.value = localToday_();
+        }
       }
 
       async function submitRepairEdit(e) {
@@ -4087,6 +4423,7 @@
         document.getElementById("financeCustomerId").value =
           c.Customer_ID || "";
         populateStaticSelects();
+        document.getElementById("financeDate").value = localToday_();
         document.getElementById("financeType").value = type;
         document.getElementById("financeModalTitle").textContent =
           type === "Credit"

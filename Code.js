@@ -362,6 +362,7 @@ function initializeFixxir(spreadsheetId) {
   ensureContactsSheet_(ss);
   ensureSalesSheets_(ss);
   ensureProcurementSchema_(ss);
+  ensureSaleProcurementSchema_(ss);
   ensureRepairDateSchema_(ss);
   ensureEntityNotesSheet_(ss);
 
@@ -892,42 +893,72 @@ function createRepair(payload) {
 function updateRepair(payload) {
   assertAuthorized_();
   payload = payload || {};
+
   const repairId = clean_(payload.Repair_ID);
   if (!repairId) throw new Error("Repair_ID is required.");
 
+  const existing = findById_(
+    FIXXIR.sheets.repairs,
+    "Repair_ID",
+    repairId,
+  );
+  if (!existing) throw new Error("Repair not found: " + repairId);
+
   const allowed = [
-    "Repair_Date",
     "Diagnosis",
     "Technician_ID",
     "Repair_Status",
-    "Priority",
-    "Expected_Completion",
-    "Quoted_Amount",
     "Final_Amount",
     "QA_Status",
     "QA_Notes",
     "Date_Completed",
-    "Warranty_Days",
-    "Collection_Method",
-    "Collected_By",
-    "Notes",
   ];
 
   const updates = {};
-  allowed.forEach((k) => {
-    if (Object.prototype.hasOwnProperty.call(payload, k)) {
-      if (["Quoted_Amount", "Final_Amount"].includes(k))
-        updates[k] = numberOrBlank_(payload[k]);
-      else if (k === "Warranty_Days") updates[k] = integer_(payload[k]);
-      else if (["Repair_Date", "Expected_Completion", "Date_Completed"].includes(k))
-        updates[k] = parseDate_(payload[k]);
-      else updates[k] = clean_(payload[k]);
+  allowed.forEach((key) => {
+    if (!Object.prototype.hasOwnProperty.call(payload, key)) return;
+
+    if (key === "Final_Amount") {
+      updates[key] = numberOrBlank_(payload[key]);
+    } else if (key === "Date_Completed") {
+      updates[key] = parseDate_(payload[key]);
+    } else {
+      updates[key] = clean_(payload[key]);
     }
   });
+
+  const nextStatus =
+    Object.prototype.hasOwnProperty.call(updates, "Repair_Status")
+      ? updates.Repair_Status
+      : existing.Repair_Status;
+
+  const nextFinal =
+    Object.prototype.hasOwnProperty.call(updates, "Final_Amount")
+      ? updates.Final_Amount
+      : existing.Final_Amount;
+
+  if (nextStatus === "Completed") {
+    if (nextFinal === "" || nextFinal === null || nextFinal === undefined) {
+      throw new Error(
+        "Enter the final amount before marking this repair Completed.",
+      );
+    }
+
+    if (!updates.Date_Completed && !existing.Date_Completed) {
+      updates.Date_Completed = new Date();
+    }
+  }
+
   updates.Last_Updated = new Date();
   updates.Last_Updated_By = currentUser_();
 
-  updateRecordById_(FIXXIR.sheets.repairs, "Repair_ID", repairId, updates);
+  updateRecordById_(
+    FIXXIR.sheets.repairs,
+    "Repair_ID",
+    repairId,
+    updates,
+  );
+
   return getRepair(repairId);
 }
 
@@ -1048,8 +1079,12 @@ function buildSalesRows_(filters) {
         : itemSummary.hasEstimatedCost
           ? "Estimated / Pending"
           : "Pending",
+      Sale_Expense_Calc: finance.debits,
       Gross_Profit_Calc: itemSummary.allCostsKnown
         ? total - itemSummary.costTotal
+        : "",
+      Contribution_Calc: itemSummary.allCostsKnown
+        ? total - itemSummary.costTotal - finance.debits
         : "",
     });
   });
@@ -1087,6 +1122,7 @@ function buildSalesRows_(filters) {
 function getSale(salesId) {
   assertAuthorized_();
   ensureSalesSheets_(getSpreadsheet_());
+  ensureSaleProcurementSchema_(getSpreadsheet_());
 
   const id = clean_(salesId);
   if (!id) throw new Error("Sales ID is required.");
@@ -1107,10 +1143,16 @@ function getSale(salesId) {
         txn.Sales_ID === id ||
         (txn.Reference_Type === "Sale" && txn.Reference_ID === id),
     )
-    .sort((a, b) => String(b.Date || "").localeCompare(String(a.Date || "")));
+    .sort((a, b) =>
+      String(b.Date || "").localeCompare(String(a.Date || "")),
+    );
 
   const paid = transactions
     .filter((txn) => txn.Transaction_Type === "Credit")
+    .reduce((sum, txn) => sum + number_(txn.Amount), 0);
+
+  const saleExpenses = transactions
+    .filter((txn) => txn.Transaction_Type === "Debit")
     .reduce((sum, txn) => sum + number_(txn.Amount), 0);
 
   const total = number_(order.Total_Amount);
@@ -1119,7 +1161,8 @@ function getSale(salesId) {
   let hasEstimatedCost = false;
 
   items.forEach((item) => {
-    const status = clean_(item.Cost_Status) ||
+    const status =
+      clean_(item.Cost_Status) ||
       (hasValue_(item.Unit_Cost) ? "Known" : "Pending");
 
     if (status !== "Known") allCostsKnown = false;
@@ -1132,10 +1175,23 @@ function getSale(salesId) {
     }
   });
 
+  const purchases = getRecords_(FIXXIR.sheets.purchases)
+    .filter((purchase) => purchase.Sales_ID === id)
+    .sort((a, b) =>
+      String(b.Purchase_Date || b.Request_Date || "").localeCompare(
+        String(a.Purchase_Date || a.Request_Date || ""),
+      ),
+    );
+
+  const grossMargin = allCostsKnown ? total - costTotal : "";
+  const contribution =
+    allCostsKnown ? grossMargin - saleExpenses : "";
+
   return {
     order,
     customer,
     items,
+    purchases,
     transactions,
     summary: {
       subtotal: number_(order.Subtotal),
@@ -1145,12 +1201,14 @@ function getSale(salesId) {
       balance: Math.max(0, total - paid),
       paymentStatus: salePaymentStatus_(total, paid),
       costTotal,
+      saleExpenses,
       costStatus: allCostsKnown
         ? "Known"
         : hasEstimatedCost
           ? "Estimated / Pending"
           : "Pending",
-      grossProfit: allCostsKnown ? total - costTotal : "",
+      grossProfit: grossMargin,
+      contribution,
     },
   };
 }
@@ -1286,7 +1344,7 @@ function createSale(payload) {
     Sales_ID: salesId,
     Date: parseDate_(payload.Date) || now,
     Customer_ID: customerId,
-    Sales_Status: clean_(payload.Sales_Status) || "Completed",
+    Sales_Status: clean_(payload.Sales_Status) || "Pending Fulfilment",
     Subtotal: subtotal,
     Discount_Amount: discount,
     Total_Amount: total,
@@ -1331,6 +1389,11 @@ function createSale(payload) {
   }
 
   syncSalePaymentFields_(salesId);
+
+  if (clean_(payload.Sales_Status) !== "Cancelled") {
+    ensureSaleProcurementForSale_(salesId);
+  }
+
   return getSale(salesId);
 }
 
@@ -1343,13 +1406,20 @@ function postSalePayment(payload) {
 
   const sale = getSale(salesId);
   const amount = number_(payload.Amount);
+  const paymentDate = parseDate_(payload.Date);
 
-  if (!(amount > 0)) throw new Error("Payment amount must be greater than zero.");
+  if (!paymentDate) throw new Error("Payment date is required.");
+  if (!(amount > 0))
+    throw new Error("Payment amount must be greater than zero.");
+
   if (amount > sale.summary.balance) {
-    throw new Error("Payment cannot exceed the outstanding sale balance.");
+    throw new Error(
+      "Payment cannot exceed the outstanding sale balance.",
+    );
   }
 
   postFinance({
+    Date: paymentDate,
     Transaction_Type: "Credit",
     Category: "Sales Revenue",
     Amount: amount,
@@ -1359,7 +1429,8 @@ function postSalePayment(payload) {
     Customer_ID: sale.order.Customer_ID,
     Reference_Type: "Sale",
     Reference_ID: salesId,
-    Description: clean_(payload.Description) || "Payment for " + salesId,
+    Description:
+      clean_(payload.Description) || "Payment for " + salesId,
     Receipt_Reference: payload.Receipt_Reference,
     Notes: payload.Notes,
   });
@@ -1925,6 +1996,8 @@ function truthy_(value) {
 function getProcurementPageData(filters) {
   assertAuthorized_();
   ensureProcurementSchema_(getSpreadsheet_());
+  ensureSaleProcurementSchema_(getSpreadsheet_());
+  backfillSaleProcurement_();
 
   filters = filters || {};
   const purchases = listPurchases(filters);
@@ -2345,8 +2418,17 @@ function getPurchase(purchaseId) {
     .reduce((sum, row) => sum + number_(row.Amount), 0);
   const supplierDue = number_(purchase.Items_Subtotal);
 
+  const linkedSale = purchase.Sales_ID
+    ? findById_(
+        FIXXIR.sheets.salesOrders,
+        "Sales_ID",
+        purchase.Sales_ID,
+      )
+    : null;
+
   return {
     purchase,
+    linkedSale,
     supplier,
     items,
     expenses,
@@ -2445,6 +2527,9 @@ function createPurchase(payload) {
 
   appendRecord_(FIXXIR.sheets.purchases, {
     Purchase_ID: purchaseId,
+    Sales_ID: clean_(payload.Sales_ID),
+    Purchase_Source: clean_(payload.Sales_ID) ? "Sale" : "Manual",
+    Request_Date: parseDate_(payload.Request_Date) || purchaseDate,
     Purchase_Date: purchaseDate,
     Supplier_ID: supplierId,
     Supplier_Reference: clean_(payload.Supplier_Reference),
@@ -2485,6 +2570,7 @@ function createPurchase(payload) {
     appendRecord_(FIXXIR.sheets.purchaseItems, {
       Purchase_Item_ID: generateId_(FIXXIR.sheets.purchaseItems),
       Purchase_ID: purchaseId,
+      Sales_Item_ID: clean_(item.Sales_Item_ID),
       Supplier_ID: supplierId,
       Supplier_Item_ID: supplierItemId,
       Product_ID: item.Product_ID,
@@ -2687,6 +2773,16 @@ function recalculatePurchaseCosts_(purchaseId) {
       Last_Updated_By: currentUser_(),
     },
   );
+
+  const updatedPurchase = findById_(
+    FIXXIR.sheets.purchases,
+    "Purchase_ID",
+    purchaseId,
+  );
+
+  if (updatedPurchase && updatedPurchase.Sales_ID) {
+    syncSaleCostsFromPurchases_(updatedPurchase.Sales_ID);
+  }
 }
 
 function upsertSupplierCatalogFromPurchase_(payload) {
@@ -3003,6 +3099,466 @@ function repairDateKey_(repair) {
   );
 }
 
+/* FIXXIR_BULK_WORKFLOW_V2 */
+
+/* ---------------- Sale finance / procurement linkage ---------------- */
+
+function updateSale(payload) {
+  assertAuthorized_();
+  payload = payload || {};
+
+  const salesId = clean_(payload.Sales_ID);
+  if (!salesId) throw new Error("Sales_ID is required.");
+
+  const order = findById_(
+    FIXXIR.sheets.salesOrders,
+    "Sales_ID",
+    salesId,
+  );
+  if (!order) throw new Error("Sale not found: " + salesId);
+
+  const items = getRecords_(FIXXIR.sheets.salesItems)
+    .filter((item) => item.Sales_ID === salesId);
+
+  const subtotal = items.reduce(
+    (sum, item) => sum + number_(item.Line_Total),
+    0,
+  );
+
+  const discount =
+    payload.Discount_Amount === undefined
+      ? number_(order.Discount_Amount)
+      : number_(payload.Discount_Amount);
+
+  if (discount < 0) throw new Error("Discount cannot be negative.");
+  if (discount > subtotal)
+    throw new Error("Discount cannot exceed subtotal.");
+
+  const updates = {
+    Subtotal: subtotal,
+    Discount_Amount: discount,
+    Total_Amount: subtotal - discount,
+    Last_Updated: new Date(),
+    Last_Updated_By: currentUser_(),
+  };
+
+  if (Object.prototype.hasOwnProperty.call(payload, "Sales_Status")) {
+    updates.Sales_Status = clean_(payload.Sales_Status);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "Date")) {
+    const saleDate = parseDate_(payload.Date);
+    if (!saleDate) throw new Error("Sale date is required.");
+    updates.Date = saleDate;
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "Notes")) {
+    updates.Notes = clean_(payload.Notes);
+  }
+
+  updateRecordById_(
+    FIXXIR.sheets.salesOrders,
+    "Sales_ID",
+    salesId,
+    updates,
+  );
+
+  if (updates.Sales_Status === "Cancelled") {
+    getRecords_(FIXXIR.sheets.purchases)
+      .filter(
+        (purchase) =>
+          purchase.Sales_ID === salesId &&
+          purchase.Purchase_Status === "Sourcing" &&
+          !purchase.Supplier_ID &&
+          !purchase.Purchase_Date,
+      )
+      .forEach((purchase) => {
+        updateRecordById_(
+          FIXXIR.sheets.purchases,
+          "Purchase_ID",
+          purchase.Purchase_ID,
+          {
+            Purchase_Status: "Cancelled",
+            Last_Updated: new Date(),
+            Last_Updated_By: currentUser_(),
+          },
+        );
+      });
+  } else {
+    ensureSaleProcurementForSale_(salesId);
+  }
+
+  syncSalePaymentFields_(salesId);
+  return getSale(salesId);
+}
+
+function postSaleExpense(payload) {
+  assertAuthorized_();
+  payload = payload || {};
+
+  const salesId = clean_(payload.Sales_ID);
+  if (!salesId) throw new Error("Sales_ID is required.");
+
+  const sale = getSale(salesId);
+  const amount = number_(payload.Amount);
+  const expenseDate = parseDate_(payload.Date);
+
+  if (!expenseDate) throw new Error("Expense date is required.");
+  if (!(amount > 0))
+    throw new Error("Expense amount must be greater than zero.");
+
+  postFinance({
+    Date: expenseDate,
+    Transaction_Type: "Debit",
+    Category: clean_(payload.Category) || "Sale Expense",
+    Amount: amount,
+    Payment_Method: payload.Payment_Method,
+    Account: payload.Account || "Operating",
+    Sales_ID: salesId,
+    Customer_ID: sale.order.Customer_ID,
+    Supplier_ID: payload.Supplier_ID,
+    Reference_Type: "Sale",
+    Reference_ID: salesId,
+    Description:
+      clean_(payload.Description) || "Sale expense for " + salesId,
+    Receipt_Reference: payload.Receipt_Reference,
+    Notes: payload.Notes,
+  });
+
+  return getSale(salesId);
+}
+
+function ensureSaleProcurementSchema_(ss) {
+  ss = ss || getSpreadsheet_();
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.purchases,
+    ["Sales_ID", "Purchase_Source", "Request_Date"],
+  );
+
+  ensureSheetColumns_(
+    ss,
+    FIXXIR.sheets.purchaseItems,
+    ["Sales_Item_ID"],
+  );
+}
+
+function backfillSaleProcurement_() {
+  ensureSaleProcurementSchema_(getSpreadsheet_());
+
+  getRecords_(FIXXIR.sheets.salesOrders)
+    .filter((sale) => sale.Sales_Status !== "Cancelled")
+    .forEach((sale) => {
+      ensureSaleProcurementForSale_(sale.Sales_ID);
+    });
+}
+
+function ensureSaleProcurementForSale_(salesId) {
+  ensureSaleProcurementSchema_(getSpreadsheet_());
+
+  const sale = findById_(
+    FIXXIR.sheets.salesOrders,
+    "Sales_ID",
+    salesId,
+  );
+  if (!sale || sale.Sales_Status === "Cancelled") return "";
+
+  const existing = getRecords_(FIXXIR.sheets.purchases)
+    .find(
+      (purchase) =>
+        purchase.Sales_ID === salesId &&
+        purchase.Purchase_Source === "Sale",
+    );
+
+  if (existing) return existing.Purchase_ID;
+
+  const saleItems = getRecords_(FIXXIR.sheets.salesItems)
+    .filter(
+      (item) =>
+        item.Sales_ID === salesId &&
+        clean_(item.Item_Source) !== "Inventory",
+    );
+
+  if (!saleItems.length) return "";
+
+  const now = new Date();
+  const purchaseId = generateId_(FIXXIR.sheets.purchases);
+
+  appendRecord_(FIXXIR.sheets.purchases, {
+    Purchase_ID: purchaseId,
+    Sales_ID: salesId,
+    Purchase_Source: "Sale",
+    Request_Date: parseDate_(sale.Date) || now,
+    Purchase_Date: "",
+    Supplier_ID: "",
+    Supplier_Reference: "",
+    Purchase_Status: "Sourcing",
+    Items_Subtotal: "",
+    Additional_Costs: 0,
+    Landed_Total: "",
+    Cost_Status: "Pending",
+    Created_At: now,
+    Created_By: currentUser_(),
+    Last_Updated: now,
+    Last_Updated_By: currentUser_(),
+    Notes: "Automatically created from " + salesId,
+  });
+
+  saleItems.forEach((item) => {
+    appendRecord_(FIXXIR.sheets.purchaseItems, {
+      Purchase_Item_ID: generateId_(FIXXIR.sheets.purchaseItems),
+      Purchase_ID: purchaseId,
+      Sales_Item_ID: item.Sales_Item_ID,
+      Supplier_ID: "",
+      Supplier_Item_ID: "",
+      Product_ID: clean_(item.Product_ID),
+      Item_Name: clean_(item.Product_Name),
+      Quantity: number_(item.Quantity),
+      Unit_Cost: "",
+      Base_Total: "",
+      Allocated_Expense: "",
+      Landed_Total: "",
+      Landed_Unit_Cost: "",
+      Cost_Status: "Pending",
+      IMEI_or_Serial: clean_(item.IMEI_or_Serial),
+      Notes: "",
+    });
+  });
+
+  return purchaseId;
+}
+
+function updatePurchaseHeader(payload) {
+  assertAuthorized_();
+  ensureSaleProcurementSchema_(getSpreadsheet_());
+  payload = payload || {};
+
+  const purchaseId = clean_(payload.Purchase_ID);
+  if (!purchaseId) throw new Error("Purchase ID is required.");
+
+  const purchase = findById_(
+    FIXXIR.sheets.purchases,
+    "Purchase_ID",
+    purchaseId,
+  );
+  if (!purchase) throw new Error("Purchase not found: " + purchaseId);
+
+  const status =
+    clean_(payload.Purchase_Status) ||
+    clean_(purchase.Purchase_Status) ||
+    "Sourcing";
+
+  const supplierId =
+    Object.prototype.hasOwnProperty.call(payload, "Supplier_ID")
+      ? clean_(payload.Supplier_ID)
+      : clean_(purchase.Supplier_ID);
+
+  const purchaseDate =
+    Object.prototype.hasOwnProperty.call(payload, "Purchase_Date")
+      ? parseDate_(payload.Purchase_Date)
+      : parseDate_(purchase.Purchase_Date);
+
+  if (supplierId) {
+    if (
+      !findById_(
+        FIXXIR.sheets.suppliers,
+        "Supplier_ID",
+        supplierId,
+      )
+    ) {
+      throw new Error("Selected vendor no longer exists.");
+    }
+  }
+
+  if (!["Sourcing", "Cancelled"].includes(status)) {
+    if (!supplierId)
+      throw new Error("Select the vendor before moving out of Sourcing.");
+    if (!purchaseDate)
+      throw new Error(
+        "Enter the actual purchase date before moving out of Sourcing.",
+      );
+  }
+
+  updateRecordById_(
+    FIXXIR.sheets.purchases,
+    "Purchase_ID",
+    purchaseId,
+    {
+      Supplier_ID: supplierId,
+      Purchase_Date: purchaseDate || "",
+      Purchase_Status: status,
+      Supplier_Reference: clean_(payload.Supplier_Reference),
+      Last_Updated: new Date(),
+      Last_Updated_By: currentUser_(),
+    },
+  );
+
+  const items = getRecords_(FIXXIR.sheets.purchaseItems)
+    .filter((item) => item.Purchase_ID === purchaseId);
+
+  items.forEach((item) => {
+    updateRecordById_(
+      FIXXIR.sheets.purchaseItems,
+      "Purchase_Item_ID",
+      item.Purchase_Item_ID,
+      { Supplier_ID: supplierId },
+    );
+
+    if (supplierId) {
+      const supplierItemId =
+        clean_(item.Supplier_Item_ID) ||
+        upsertSupplierCatalogFromPurchase_({
+          Supplier_ID: supplierId,
+          Product_ID: item.Product_ID,
+          Supplier_Item_Name: item.Item_Name,
+          Unit_Cost: item.Unit_Cost,
+          Purchase_Date: purchaseDate || "",
+        });
+
+      if (!item.Supplier_Item_ID && supplierItemId) {
+        updateRecordById_(
+          FIXXIR.sheets.purchaseItems,
+          "Purchase_Item_ID",
+          item.Purchase_Item_ID,
+          { Supplier_Item_ID: supplierItemId },
+        );
+      }
+    }
+  });
+
+  recalculatePurchaseCosts_(purchaseId);
+  return getPurchase(purchaseId);
+}
+
+function addPurchaseExpense(payload) {
+  assertAuthorized_();
+  ensureProcurementSchema_(getSpreadsheet_());
+  payload = payload || {};
+
+  const purchaseId = clean_(payload.Purchase_ID);
+  if (!purchaseId) throw new Error("Purchase ID is required.");
+
+  const purchase = findById_(
+    FIXXIR.sheets.purchases,
+    "Purchase_ID",
+    purchaseId,
+  );
+  if (!purchase) throw new Error("Purchase not found: " + purchaseId);
+
+  const amount = number_(payload.Amount);
+  if (!(amount > 0))
+    throw new Error("Shared cost amount must be greater than zero.");
+
+  const allocationMethod =
+    clean_(payload.Allocation_Method) || "By Value";
+
+  if (!["By Value", "By Quantity"].includes(allocationMethod)) {
+    throw new Error("Allocation must be By Value or By Quantity.");
+  }
+
+  appendRecord_(FIXXIR.sheets.purchaseExpenses, {
+    Purchase_Expense_ID: generateId_(
+      FIXXIR.sheets.purchaseExpenses,
+    ),
+    Purchase_ID: purchaseId,
+    Purchase_Date: parseDate_(purchase.Purchase_Date) || "",
+    Expense_Type: clean_(payload.Expense_Type) || "Other",
+    Description: clean_(payload.Description),
+    Amount: amount,
+    Allocation_Method: allocationMethod,
+    Payee: clean_(payload.Payee),
+    Created_At: new Date(),
+    Entered_By: currentUser_(),
+    Notes: clean_(payload.Notes),
+  });
+
+  recalculatePurchaseCosts_(purchaseId);
+  return getPurchase(purchaseId);
+}
+
+function syncSaleCostsFromPurchases_(salesId) {
+  if (!salesId) return;
+
+  ensureSaleProcurementSchema_(getSpreadsheet_());
+
+  const saleItems = getRecords_(FIXXIR.sheets.salesItems)
+    .filter((item) => item.Sales_ID === salesId);
+
+  const purchaseMap = objectMap_(
+    getRecords_(FIXXIR.sheets.purchases),
+    "Purchase_ID",
+  );
+
+  const purchaseItems = getRecords_(FIXXIR.sheets.purchaseItems)
+    .filter((item) => {
+      if (!item.Sales_Item_ID) return false;
+      const purchase = purchaseMap[item.Purchase_ID] || {};
+
+      return (
+        purchase.Sales_ID === salesId &&
+        purchase.Purchase_Status !== "Sourcing" &&
+        purchase.Purchase_Status !== "Cancelled" &&
+        !!purchase.Supplier_ID &&
+        !!purchase.Purchase_Date
+      );
+    });
+
+  saleItems.forEach((saleItem) => {
+    const linked = purchaseItems.filter(
+      (item) => item.Sales_Item_ID === saleItem.Sales_Item_ID,
+    );
+
+    const requiredQty = number_(saleItem.Quantity);
+    const linkedQty = linked.reduce(
+      (sum, item) => sum + number_(item.Quantity),
+      0,
+    );
+
+    const allKnown =
+      linked.length > 0 &&
+      linkedQty >= requiredQty &&
+      linked.every(
+        (item) =>
+          item.Cost_Status === "Known" &&
+          hasValue_(item.Landed_Total),
+      );
+
+    if (!allKnown) {
+      updateRecordById_(
+        FIXXIR.sheets.salesItems,
+        "Sales_Item_ID",
+        saleItem.Sales_Item_ID,
+        {
+          Unit_Cost: "",
+          Cost_Total: "",
+          Cost_Status: "Pending",
+        },
+      );
+      return;
+    }
+
+    const landedTotal = linked.reduce(
+      (sum, item) => sum + number_(item.Landed_Total),
+      0,
+    );
+
+    const landedUnit =
+      linkedQty > 0 ? landedTotal / linkedQty : 0;
+
+    updateRecordById_(
+      FIXXIR.sheets.salesItems,
+      "Sales_Item_ID",
+      saleItem.Sales_Item_ID,
+      {
+        Unit_Cost: landedUnit,
+        Cost_Total: landedUnit * requiredQty,
+        Cost_Status: "Known",
+      },
+    );
+  });
+}
+
 function postFinance(payload) {
   assertAuthorized_();
   payload = payload || {};
@@ -3089,25 +3645,40 @@ function postFinance(payload) {
 /* ---------------- Dashboard ---------------- */
 
 function getDashboardData_() {
+  ensureSaleProcurementSchema_(getSpreadsheet_());
+  backfillSaleProcurement_();
+
   const customers = getRecords_(FIXXIR.sheets.customers);
   const repairs = getRecords_(FIXXIR.sheets.repairs);
   const finance = getRecords_(FIXXIR.sheets.finance);
   const financeMap = buildRepairFinanceMap_(finance);
 
   const openRepairs = repairs.filter(
-    (r) => !FIXXIR.closedRepairStatuses.includes(r.Repair_Status),
+    (repair) =>
+      !FIXXIR.closedRepairStatuses.includes(repair.Repair_Status),
   );
-  const ready = repairs.filter((r) => r.Repair_Status === "Ready for Pickup");
+
+  const ready = repairs.filter(
+    (repair) => repair.Repair_Status === "Ready for Pickup",
+  );
 
   let outstanding = 0;
-  repairs.forEach((r) => {
+
+  repairs.forEach((repair) => {
     if (
-      FIXXIR.closedRepairStatuses.includes(r.Repair_Status) &&
-      r.Repair_Status !== "Completed"
-    )
+      FIXXIR.closedRepairStatuses.includes(repair.Repair_Status) &&
+      repair.Repair_Status !== "Completed"
+    ) {
       return;
-    const revenue = number_(r.Final_Amount) || number_(r.Quoted_Amount);
-    const paid = (financeMap[r.Repair_ID] || { credits: 0 }).credits;
+    }
+
+    const revenue =
+      number_(repair.Final_Amount) ||
+      number_(repair.Quoted_Amount);
+
+    const paid =
+      (financeMap[repair.Repair_ID] || { credits: 0 }).credits;
+
     outstanding += Math.max(0, revenue - paid);
   });
 
@@ -3116,32 +3687,53 @@ function getDashboardData_() {
     Session.getScriptTimeZone(),
     "yyyy-MM-dd",
   );
-  let todayCredits = 0,
-    todayDebits = 0;
-  finance.forEach((t) => {
-    const txnDate = dateKey_(t.Date);
-    if (txnDate !== today) return;
-    if (t.Transaction_Type === "Credit") todayCredits += number_(t.Amount);
-    if (t.Transaction_Type === "Debit") todayDebits += number_(t.Amount);
+
+  let todayCredits = 0;
+  let todayDebits = 0;
+
+  finance.forEach((txn) => {
+    if (dateKey_(txn.Date) !== today) return;
+
+    if (txn.Transaction_Type === "Credit") {
+      todayCredits += number_(txn.Amount);
+    }
+
+    if (txn.Transaction_Type === "Debit") {
+      todayDebits += number_(txn.Amount);
+    }
   });
 
   const customerMap = objectMap_(customers, "Customer_ID");
-  const recent = repairs
+
+  const recentOpenRepairs = openRepairs
     .slice()
     .sort((a, b) =>
       repairDateKey_(b).localeCompare(repairDateKey_(a)),
     )
-    .slice(0, 8)
-    .map((r) => ({
-      Repair_ID: r.Repair_ID,
-      Repair_Date: r.Repair_Date || r.Date_Received,
-      Date_Received: r.Date_Received,
-      Customer_Name: customerMap[r.Customer_ID]
-        ? customerMap[r.Customer_ID].Full_Name
+    .slice(0, 5)
+    .map((repair) => ({
+      Repair_ID: repair.Repair_ID,
+      Repair_Date: repair.Repair_Date || repair.Date_Received,
+      Customer_Name: customerMap[repair.Customer_ID]
+        ? customerMap[repair.Customer_ID].Full_Name
         : "",
-      Device: [r.Brand, r.Model].filter(Boolean).join(" "),
-      Repair_Status: r.Repair_Status,
-      Priority: r.Priority,
+      Device: [repair.Brand, repair.Model].filter(Boolean).join(" "),
+      Repair_Status: repair.Repair_Status,
+    }));
+
+  const recentSales = buildSalesRows_({})
+    .filter((sale) => sale.Sales_Status !== "Cancelled")
+    .slice(0, 5)
+    .map((sale) => ({
+      Sales_ID: sale.Sales_ID,
+      Date: sale.Date,
+      Customer_Name: sale.Customer_Name,
+      Item_Summary: sale.Item_Summary,
+      Sales_Status: sale.Sales_Status,
+      Total_Amount: sale.Total_Amount,
+      Amount_Paid_Calc: sale.Amount_Paid_Calc,
+      Balance_Calc: sale.Balance_Calc,
+      Payment_Status_Calc: sale.Payment_Status_Calc,
     }));
 
   return {
@@ -3152,10 +3744,10 @@ function getDashboardData_() {
     todayCredits,
     todayDebits,
     netToday: todayCredits - todayDebits,
-    recentRepairs: recent,
+    recentOpenRepairs,
+    recentSales,
   };
 }
-
 
 /* ---------------- Repair / Purchase Notes ---------------- */
 
